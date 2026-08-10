@@ -48,7 +48,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/application.c
     Core/Src/icm20948.c
     Core/Src/imu.c
+    Core/Src/neo6m.c
     Core/Src/stm32_i2c_bus.c
+    Core/Src/stm32_uart_stream.c
     Core/Src/uart_console.c
 )
 
