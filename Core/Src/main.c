@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "application.h"
 
 /* USER CODE END Includes */
 
@@ -94,6 +95,7 @@ int main(void)
   MX_I2C1_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  Application_Init(&hi2c1, &huart2);
 
   /* USER CODE END 2 */
 
@@ -104,6 +106,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    Application_Run();
   }
   /* USER CODE END 3 */
 }

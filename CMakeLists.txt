@@ -45,6 +45,11 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    Core/Src/application.c
+    Core/Src/icm20948.c
+    Core/Src/imu.c
+    Core/Src/stm32_i2c_bus.c
+    Core/Src/uart_console.c
 )
 
 # Add include paths
@@ -55,6 +60,11 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
+)
+
+# Newlib-nano omits floating-point formatting unless it is requested explicitly.
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
+    -u _printf_float
 )
 
 # Remove wrong libob.a library dependency when using cpp files
