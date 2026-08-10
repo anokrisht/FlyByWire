@@ -43,6 +43,28 @@ Icm20948_Status Imu_Init(Imu *imu, const I2cBus *bus, uint8_t address)
   return Icm20948_Init(&imu->sensor, bus, address);
 }
 
+Icm20948_Status Imu_Reinitialize(Imu *imu)
+{
+  if ((imu == NULL) || (imu->sensor.bus.read_registers == NULL))
+  {
+    return ICM20948_ERROR_ARGUMENT;
+  }
+
+  const I2cBus bus = imu->sensor.bus;
+  const uint8_t address = imu->sensor.address;
+  const Icm20948_Calibration calibration = imu->sensor.calibration;
+  const float declination_deg = imu->declination_deg;
+  Imu candidate;
+  const Icm20948_Status status = Imu_Init(&candidate, &bus, address);
+  if (status == ICM20948_OK)
+  {
+    Icm20948_SetCalibration(&candidate.sensor, &calibration);
+    candidate.declination_deg = declination_deg;
+    *imu = candidate;
+  }
+  return status;
+}
+
 Icm20948_Status Imu_Update(Imu *imu, uint32_t timestamp_ms)
 {
   if (imu == NULL)
@@ -114,17 +136,18 @@ Icm20948_Status Imu_Update(Imu *imu, uint32_t timestamp_ms)
   }
 
   imu->previous_update_ms = timestamp_ms;
+  imu->data_valid = true;
   return ICM20948_OK;
 }
 
 const Icm20948_RawData *Imu_GetRaw(const Imu *imu)
 {
-  return (imu != NULL) ? &imu->raw : NULL;
+  return ((imu != NULL) && imu->data_valid) ? &imu->raw : NULL;
 }
 
 const Icm20948_Data *Imu_GetData(const Imu *imu)
 {
-  return (imu != NULL) ? &imu->data : NULL;
+  return ((imu != NULL) && imu->data_valid) ? &imu->data : NULL;
 }
 
 const Imu_Orientation *Imu_GetOrientation(const Imu *imu)
@@ -145,5 +168,14 @@ void Imu_SetMagneticDeclination(Imu *imu, float declination_deg)
   if (imu != NULL)
   {
     imu->declination_deg = declination_deg;
+  }
+}
+
+void Imu_Invalidate(Imu *imu)
+{
+  if (imu != NULL)
+  {
+    imu->data_valid = false;
+    imu->orientation_valid = false;
   }
 }

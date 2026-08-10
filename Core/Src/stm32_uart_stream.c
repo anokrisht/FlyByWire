@@ -37,16 +37,7 @@ static bool register_stream(Stm32UartStream *stream)
 static bool read_byte(void *context, uint8_t *byte)
 {
   Stm32UartStream *stream = context;
-  if ((stream == NULL) || (byte == NULL) ||
-      (stream->read_index == stream->write_index))
-  {
-    return false;
-  }
-
-  *byte = stream->buffer[stream->read_index];
-  stream->read_index =
-      (uint16_t)((stream->read_index + 1U) % STM32_UART_STREAM_CAPACITY);
-  return true;
+  return (stream != NULL) && ByteRingBuffer_Pop(&stream->receive_buffer, byte);
 }
 
 bool Stm32UartStream_Start(Stm32UartStream *stream,
@@ -59,13 +50,30 @@ bool Stm32UartStream_Start(Stm32UartStream *stream,
 
   memset(stream, 0, sizeof(*stream));
   stream->handle = handle;
-  if (!register_stream(stream))
+  if (!ByteRingBuffer_Init(&stream->receive_buffer, stream->buffer,
+                           STM32_UART_STREAM_CAPACITY) ||
+      !register_stream(stream))
   {
     return false;
   }
 
   stream->started =
       (HAL_UART_Receive_IT(handle, &stream->interrupt_byte, 1U) == HAL_OK);
+  return stream->started;
+}
+
+bool Stm32UartStream_Recover(Stm32UartStream *stream)
+{
+  if ((stream == NULL) || (stream->handle == NULL))
+  {
+    return false;
+  }
+
+  (void)HAL_UART_AbortReceive(stream->handle);
+  __HAL_UART_CLEAR_OREFLAG(stream->handle);
+  ByteRingBuffer_Clear(&stream->receive_buffer);
+  stream->started =
+      (HAL_UART_Receive_IT(stream->handle, &stream->interrupt_byte, 1U) == HAL_OK);
   return stream->started;
 }
 
@@ -80,7 +88,7 @@ ByteStream Stm32UartStream_AsByteStream(Stm32UartStream *stream)
 
 uint32_t Stm32UartStream_GetOverflowCount(const Stm32UartStream *stream)
 {
-  return (stream != NULL) ? stream->overflow_count : 0U;
+  return (stream != NULL) ? stream->receive_buffer.overflow_count : 0U;
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *handle)
@@ -91,17 +99,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *handle)
     return;
   }
 
-  const uint16_t next =
-      (uint16_t)((stream->write_index + 1U) % STM32_UART_STREAM_CAPACITY);
-  if (next != stream->read_index)
-  {
-    stream->buffer[stream->write_index] = stream->interrupt_byte;
-    stream->write_index = next;
-  }
-  else
-  {
-    ++stream->overflow_count;
-  }
+  (void)ByteRingBuffer_Push(&stream->receive_buffer, stream->interrupt_byte);
 
   (void)HAL_UART_Receive_IT(handle, &stream->interrupt_byte, 1U);
 }

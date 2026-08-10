@@ -82,4 +82,7 @@ bool Neo6m_GetUtcDate(const Neo6m *gps, Neo6m_Date *date);
 bool Neo6m_GetLocalTime(const Neo6m *gps, int16_t utc_offset_minutes,
                         Neo6m_Time *time, int8_t *day_offset);
 
+/** Mark cached navigation values invalid after transport becomes stale. */
+void Neo6m_InvalidateData(Neo6m *gps);
+
 #endif /* NEO6M_H */

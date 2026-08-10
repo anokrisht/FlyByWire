@@ -425,3 +425,18 @@ bool Neo6m_GetLocalTime(const Neo6m *gps, int16_t utc_offset_minutes,
   time->minutes = (uint8_t)(minutes % 60);
   return true;
 }
+
+void Neo6m_InvalidateData(Neo6m *gps)
+{
+  if (gps != NULL)
+  {
+    gps->data.coordinates.valid = false;
+    gps->data.utc_time.valid = false;
+    gps->data.utc_date.valid = false;
+    gps->data.altitude_valid = false;
+    gps->data.speed_valid = false;
+    gps->data.course_valid = false;
+    gps->data.fix_quality = 0U;
+    gps->data.satellites = 0U;
+  }
+}

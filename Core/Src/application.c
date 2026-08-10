@@ -3,6 +3,7 @@
 #include "imu.h"
 #include "main.h"
 #include "neo6m.h"
+#include "sensor_health.h"
 #include "stm32_i2c_bus.h"
 #include "stm32_uart_stream.h"
 #include "uart_console.h"
@@ -13,10 +14,18 @@
 #define ICM20948_I2C_ADDRESS 0x68U
 #define IMU_SAMPLE_PERIOD_MS  10U
 #define TELEMETRY_PERIOD_MS   100U
+#define IMU_STALE_TIMEOUT_MS  250U
+#define IMU_RETRY_INTERVAL_MS 1000U
+#define GPS_STALE_TIMEOUT_MS  3000U
+#define GPS_RETRY_INTERVAL_MS 2000U
+#define SENSOR_FAILURE_LIMIT  3U
 
 static Imu imu;
 static Neo6m gps;
+static I2cBus imu_i2c_bus;
 static Stm32UartStream gps_uart_stream;
+static SensorHealth imu_health;
+static SensorHealth gps_health;
 static uint32_t last_sample_ms;
 static uint32_t last_telemetry_ms;
 
@@ -43,33 +52,47 @@ void Application_Init(I2C_HandleTypeDef *i2c, UART_HandleTypeDef *console_uart,
                       UART_HandleTypeDef *gps_uart)
 {
   UartConsole_Init(console_uart);
-  const I2cBus i2c_bus = Stm32I2cBus_Create(i2c);
-  if (!Stm32UartStream_Start(&gps_uart_stream, gps_uart))
-  {
-    UartConsole_WriteLine("ERROR: GPS UART reception failed");
-    Error_Handler();
-  }
+  const uint32_t now = HAL_GetTick();
+  SensorHealth_Init(&imu_health, now, IMU_STALE_TIMEOUT_MS,
+                    IMU_RETRY_INTERVAL_MS, SENSOR_FAILURE_LIMIT);
+  SensorHealth_Init(&gps_health, now, GPS_STALE_TIMEOUT_MS,
+                    GPS_RETRY_INTERVAL_MS, SENSOR_FAILURE_LIMIT);
+  imu_i2c_bus = Stm32I2cBus_Create(i2c);
+
+  const bool gps_uart_started =
+      Stm32UartStream_Start(&gps_uart_stream, gps_uart);
   const ByteStream gps_stream =
       Stm32UartStream_AsByteStream(&gps_uart_stream);
   if (!Neo6m_Init(&gps, &gps_stream))
   {
-    UartConsole_WriteLine("ERROR: GPS driver initialization failed");
+    UartConsole_WriteLine("FATAL: invalid GPS driver configuration");
     Error_Handler();
   }
-
-  if (Imu_Init(&imu, &i2c_bus, ICM20948_I2C_ADDRESS) != ICM20948_OK)
+  if (!gps_uart_started)
   {
-    UartConsole_WriteLine("ERROR: ICM-20948 initialization failed");
-    Error_Handler();
+    SensorHealth_MarkOffline(&gps_health, now);
+    UartConsole_WriteLine("WARN: GPS UART offline; recovery scheduled");
   }
 
-  UartConsole_WriteLine("FlyByWire: IMU and GPS interfaces ready");
+  if (Imu_Init(&imu, &imu_i2c_bus, ICM20948_I2C_ADDRESS) == ICM20948_OK)
+  {
+    SensorHealth_RecordSuccess(&imu_health, HAL_GetTick());
+  }
+  else
+  {
+    SensorHealth_MarkOffline(&imu_health, HAL_GetTick());
+    UartConsole_WriteLine("WARN: ICM-20948 offline; recovery scheduled");
+  }
+
+  UartConsole_WriteLine("FlyByWire: sensor supervision active");
 }
 
 void Application_Run(void)
 {
+  uint32_t now = HAL_GetTick();
   while (Neo6m_Poll(&gps))
   {
+    SensorHealth_RecordSuccess(&gps_health, now);
     const char *sentence = Neo6m_GetSentence(&gps);
     UartConsole_WriteString("GPS: ");
     UartConsole_WriteLine(sentence);
@@ -80,7 +103,33 @@ void Application_Run(void)
     }
   }
 
-  const uint32_t now = HAL_GetTick();
+  SensorHealth_Update(&gps_health, now);
+  if ((gps_health.state == SENSOR_HEALTH_STALE) ||
+      (gps_health.state == SENSOR_HEALTH_OFFLINE))
+  {
+    Neo6m_InvalidateData(&gps);
+  }
+  if (SensorHealth_ShouldRetry(&gps_health, now))
+  {
+    (void)Stm32UartStream_Recover(&gps_uart_stream);
+    SensorHealth_MarkOffline(&gps_health, now);
+  }
+
+  SensorHealth_Update(&imu_health, now);
+  if (SensorHealth_ShouldRetry(&imu_health, now))
+  {
+    if (Imu_Reinitialize(&imu) == ICM20948_OK)
+    {
+      SensorHealth_RecordSuccess(&imu_health, HAL_GetTick());
+      UartConsole_WriteLine("INFO: ICM-20948 recovered");
+    }
+    else
+    {
+      SensorHealth_MarkOffline(&imu_health, HAL_GetTick());
+    }
+    return;
+  }
+
   if ((uint32_t)(now - last_sample_ms) < IMU_SAMPLE_PERIOD_MS)
   {
     return;
@@ -88,7 +137,20 @@ void Application_Run(void)
   last_sample_ms = now;
 
   const Icm20948_Status status = Imu_Update(&imu, now);
-  if ((status != ICM20948_OK) && (status != ICM20948_NOT_READY))
+  if (status == ICM20948_OK)
+  {
+    SensorHealth_RecordSuccess(&imu_health, now);
+  }
+  else if (status != ICM20948_NOT_READY)
+  {
+    SensorHealth_RecordFailure(&imu_health, now);
+    if (imu_health.state == SENSOR_HEALTH_OFFLINE)
+    {
+      Imu_Invalidate(&imu);
+    }
+    return;
+  }
+  else
   {
     return;
   }
@@ -107,4 +169,14 @@ void Application_Run(void)
              orientation->heading_deg);*/
     }
   }
+}
+
+const SensorHealth *Application_GetImuHealth(void)
+{
+  return &imu_health;
+}
+
+const SensorHealth *Application_GetGpsHealth(void)
+{
+  return &gps_health;
 }
