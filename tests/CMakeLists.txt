@@ -8,13 +8,22 @@ enable_testing()
 
 add_executable(flybywire_tests
     test_main.c
-    ../Core/Src/byte_ring_buffer.c
-    ../Core/Src/icm20948.c
-    ../Core/Src/imu.c
-    ../Core/Src/neo6m.c
-    ../Core/Src/sensor_health.c
+    ../Drivers/GNSS/Src/nmea_parser.c
+    ../Drivers/ICM20948/Src/icm20948.c
+    ../Services/Health/Src/sensor_health.c
+    ../Services/GPS/Src/gps_service.c
+    ../Services/IMU/Src/imu.c
+    ../Utilities/Src/byte_ring_buffer.c
 )
-target_include_directories(flybywire_tests PRIVATE ../Core/Inc)
+target_include_directories(flybywire_tests PRIVATE
+    ../Drivers/GNSS/Inc
+    ../Drivers/ICM20948/Inc
+    ../Platform/Interfaces/Inc
+    ../Services/Health/Inc
+    ../Services/GPS/Inc
+    ../Services/IMU/Inc
+    ../Utilities/Inc
+)
 if(MSVC)
   target_compile_options(flybywire_tests PRIVATE /W4)
 else()

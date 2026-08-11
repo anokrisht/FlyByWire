@@ -1,6 +1,6 @@
 #include "icm20948.h"
 #include "imu.h"
-#include "neo6m.h"
+#include "gps_service.h"
 #include "sensor_health.h"
 #include "byte_ring_buffer.h"
 
@@ -78,63 +78,120 @@ static void test_nmea_parsing(void)
 {
   FakeStream fake = {0};
   const ByteStream stream = {.context = &fake, .read_byte = fake_read_byte};
-  Neo6m gps;
-  char sentence[NEO6M_MAX_SENTENCE_LENGTH];
-  CHECK(Neo6m_Init(&gps, &stream));
+  GpsService gps;
+  char sentence[NMEA_MAX_SENTENCE_LENGTH];
+  CHECK(GpsService_Init(&gps, &stream));
 
   make_nmea(sentence, sizeof(sentence),
             "GNGLL,1234.50000,N,01234.50000,E,120000.00,A,A");
   set_stream(&fake, sentence);
-  CHECK(Neo6m_Poll(&gps));
-  Neo6m_Coordinates coordinates;
-  CHECK(Neo6m_GetCoordinates(&gps, &coordinates));
+  CHECK(GpsService_Update(&gps));
+  GpsCoordinates coordinates;
+  CHECK(GpsService_GetCoordinates(&gps, &coordinates));
   CHECK_NEAR(coordinates.latitude_deg, 12.575, 0.0000001);
   CHECK_NEAR(coordinates.longitude_deg, 12.575, 0.0000001);
-  Neo6m_Time time;
-  CHECK(Neo6m_GetUtcTime(&gps, &time));
+  GpsTime time;
+  CHECK(GpsService_GetUtcTime(&gps, &time));
   CHECK((time.hours == 12U) && (time.minutes == 0U) && (time.seconds == 0U));
 
   make_nmea(sentence, sizeof(sentence),
             "GNGGA,120001.00,1234.50000,N,01234.50000,E,1,07,1.47,"
-            "100.0,M,0.0,M,,");
+            "100.0,M,-20.5,M,2.5,0042");
   set_stream(&fake, sentence);
-  CHECK(Neo6m_Poll(&gps));
-  const Neo6m_Data *data = Neo6m_GetData(&gps);
+  CHECK(GpsService_Update(&gps));
+  const GpsData *data = GpsService_GetData(&gps);
   CHECK(data->altitude_valid);
   CHECK_NEAR(data->altitude_m, 100.0, 0.01);
   CHECK(data->satellites == 7U);
   CHECK(data->fix_quality == 1U);
   CHECK_NEAR(data->horizontal_dilution, 1.47, 0.001);
+  CHECK(data->geoid_separation_valid);
+  CHECK_NEAR(data->geoid_separation_m, -20.5, 0.001);
+  CHECK(data->differential_age_valid);
+  CHECK_NEAR(data->differential_age_s, 2.5, 0.001);
+  CHECK(data->differential_station_valid);
+  CHECK(data->differential_station_id == 42U);
 
   make_nmea(sentence, sizeof(sentence),
             "GNRMC,230500.00,A,1234.50000,S,01234.50000,W,10.000,"
             "90.0,010124,,,A,V");
   set_stream(&fake, sentence);
-  CHECK(Neo6m_Poll(&gps));
-  data = Neo6m_GetData(&gps);
+  CHECK(GpsService_Update(&gps));
+  data = GpsService_GetData(&gps);
   CHECK(data->speed_valid);
   CHECK_NEAR(data->speed_mps, 5.144444, 0.0001);
+  CHECK_NEAR(data->speed_knots, 10.0, 0.001);
+  CHECK_NEAR(data->speed_kph, 18.52, 0.001);
   CHECK_NEAR(data->course_deg, 90.0, 0.001);
   CHECK_NEAR(data->coordinates.latitude_deg, -12.575, 0.0000001);
   CHECK_NEAR(data->coordinates.longitude_deg, -12.575, 0.0000001);
-  Neo6m_Date date;
-  CHECK(Neo6m_GetUtcDate(&gps, &date));
+  GpsDate date;
+  CHECK(GpsService_GetUtcDate(&gps, &date));
   CHECK((date.day == 1U) && (date.month == 1U) && (date.year == 2024U));
 
   int8_t day_offset;
-  CHECK(Neo6m_GetLocalTime(&gps, 120, &time, &day_offset));
+  CHECK(GpsService_GetLocalTime(&gps, 120, &time, &day_offset));
   CHECK((time.hours == 1U) && (time.minutes == 5U) && (day_offset == 1));
+
+  make_nmea(sentence, sizeof(sentence),
+            "GNVTG,90.0,T,85.0,M,10.0,N,18.52,K,A");
+  set_stream(&fake, sentence);
+  CHECK(GpsService_Update(&gps));
+  data = GpsService_GetData(&gps);
+  CHECK_NEAR(data->course_deg, 90.0, 0.001);
+  CHECK_NEAR(data->magnetic_course_deg, 85.0, 0.001);
+  CHECK_NEAR(data->speed_kph, 18.52, 0.001);
+  CHECK(data->positioning_mode == 'A');
+
+  make_nmea(sentence, sizeof(sentence),
+            "GNGSA,A,3,01,02,03,,,,,,,,,,1.50,0.90,1.20,1");
+  set_stream(&fake, sentence);
+  CHECK(GpsService_Update(&gps));
+  data = GpsService_GetData(&gps);
+  CHECK(data->fix_dimension == GPS_FIX_3D);
+  CHECK(data->selection_mode == 'A');
+  CHECK(data->active_constellation == GPS_CONSTELLATION_GPS);
+  CHECK(data->used_satellite_count == 3U);
+  CHECK(data->used_satellites[0].id == 1U);
+  CHECK(data->dilution_valid);
+  CHECK_NEAR(data->position_dilution, 1.50, 0.001);
+  CHECK_NEAR(data->horizontal_dilution, 0.90, 0.001);
+  CHECK_NEAR(data->vertical_dilution, 1.20, 0.001);
+
+  make_nmea(sentence, sizeof(sentence),
+            "GPGSV,2,1,05,01,45,100,40,02,30,200,35,03,15,300,20,"
+            "04,60,050,45,1");
+  set_stream(&fake, sentence);
+  CHECK(GpsService_Update(&gps));
+  make_nmea(sentence, sizeof(sentence),
+            "GPGSV,2,2,05,05,10,150,,1");
+  set_stream(&fake, sentence);
+  CHECK(GpsService_Update(&gps));
+  make_nmea(sentence, sizeof(sentence),
+            "GLGSV,1,1,02,71,25,020,15,72,50,180,30,1");
+  set_stream(&fake, sentence);
+  CHECK(GpsService_Update(&gps));
+  data = GpsService_GetData(&gps);
+  CHECK(data->visible_satellite_count == 7U);
+  CHECK(data->satellites_in_view == 7U);
+  CHECK(data->visible_satellites[0].constellation == GPS_CONSTELLATION_GPS);
+  CHECK(data->visible_satellites[0].signal_strength_dbhz == 40U);
+  CHECK(data->visible_satellites[4].id == 5U);
+  CHECK(!data->visible_satellites[4].signal_strength_valid);
+  CHECK(data->visible_satellites[5].constellation == GPS_CONSTELLATION_GLONASS);
 
   make_nmea(sentence, sizeof(sentence),
             "GNGLL,1234.50000,N,01234.50000,E,120000.00,A,A");
   sentence[strlen(sentence) - 4U] =
       (sentence[strlen(sentence) - 4U] == '0') ? '1' : '0';
   set_stream(&fake, sentence);
-  CHECK(!Neo6m_Poll(&gps));
-  CHECK(gps.checksum_error_count == 1U);
-  Neo6m_InvalidateData(&gps);
-  CHECK(!Neo6m_GetCoordinates(&gps, &coordinates));
-  CHECK(!Neo6m_GetUtcTime(&gps, &time));
+  CHECK(!GpsService_Update(&gps));
+  GpsDiagnostics diagnostics;
+  CHECK(GpsService_GetDiagnostics(&gps, &diagnostics));
+  CHECK(diagnostics.checksum_error_count == 1U);
+  GpsService_Invalidate(&gps);
+  CHECK(!GpsService_GetCoordinates(&gps, &coordinates));
+  CHECK(!GpsService_GetUtcTime(&gps, &time));
 }
 
 static void test_sensor_health(void)

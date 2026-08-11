@@ -2,7 +2,7 @@
 
 #include "imu.h"
 #include "main.h"
-#include "neo6m.h"
+#include "gps_service.h"
 #include "sensor_health.h"
 #include "stm32_i2c_bus.h"
 #include "stm32_uart_stream.h"
@@ -21,7 +21,7 @@
 #define SENSOR_FAILURE_LIMIT  3U
 
 static Imu imu;
-static Neo6m gps;
+static GpsService gps;
 static I2cBus imu_i2c_bus;
 static Stm32UartStream gps_uart_stream;
 static SensorHealth imu_health;
@@ -29,22 +29,48 @@ static SensorHealth gps_health;
 static uint32_t last_sample_ms;
 static uint32_t last_telemetry_ms;
 
+static const char *gps_fix_name(const GpsData *data, bool fix_valid)
+{
+  if (!fix_valid)
+  {
+    return "NO FIX";
+  }
+  if (data->fix_dimension == GPS_FIX_3D)
+  {
+    return "3D FIX";
+  }
+  if (data->fix_dimension == GPS_FIX_2D)
+  {
+    return "2D FIX";
+  }
+  return "FIX";
+}
+
 static void print_gps_fix(void)
 {
-  Neo6m_Coordinates coordinates;
-  Neo6m_Time utc;
-  const Neo6m_Data *data = Neo6m_GetData(&gps);
+  GpsCoordinates coordinates = {0};
+  GpsTime utc = {0};
+  const GpsData *data = GpsService_GetData(&gps);
 
-  if ((data != NULL) && Neo6m_GetCoordinates(&gps, &coordinates) &&
-      Neo6m_GetUtcTime(&gps, &utc))
+  if (data != NULL)
   {
-    printf("GPS FIX: UTC %02u:%02u:%02u | %.7f, %.7f | "
-           "ALT %.1f m | SPEED %.2f m/s | SAT %u\r\n",
+    const bool fix_valid =
+        GpsService_GetCoordinates(&gps, &coordinates);
+    (void)GpsService_GetUtcTime(&gps, &utc);
+
+    printf("GPS %s: UTC %02u:%02u:%02u | %.7f, %.7f | "
+           "ALT %.1f m | SPEED %.2f m/s | COURSE %.1f deg | "
+           "SAT %u/%u | DOP %.2f/%.2f/%.2f\r\n",
+           gps_fix_name(data, fix_valid),
            utc.hours, utc.minutes, utc.seconds,
            coordinates.latitude_deg, coordinates.longitude_deg,
-           data->altitude_valid ? data->altitude_m : 0.0F,
-           data->speed_valid ? data->speed_mps : 0.0F,
-           data->satellites);
+           (fix_valid && data->altitude_valid) ? data->altitude_m : 0.0F,
+           (fix_valid && data->speed_valid) ? data->speed_mps : 0.0F,
+           (fix_valid && data->course_valid) ? data->course_deg : 0.0F,
+           data->satellites, data->satellites_in_view,
+           data->dilution_valid ? data->position_dilution : 0.0F,
+           data->dilution_valid ? data->horizontal_dilution : 0.0F,
+           data->dilution_valid ? data->vertical_dilution : 0.0F);
   }
 }
 
@@ -63,7 +89,7 @@ void Application_Init(I2C_HandleTypeDef *i2c, UART_HandleTypeDef *console_uart,
       Stm32UartStream_Start(&gps_uart_stream, gps_uart);
   const ByteStream gps_stream =
       Stm32UartStream_AsByteStream(&gps_uart_stream);
-  if (!Neo6m_Init(&gps, &gps_stream))
+  if (!GpsService_Init(&gps, &gps_stream))
   {
     UartConsole_WriteLine("FATAL: invalid GPS driver configuration");
     Error_Handler();
@@ -90,12 +116,10 @@ void Application_Init(I2C_HandleTypeDef *i2c, UART_HandleTypeDef *console_uart,
 void Application_Run(void)
 {
   uint32_t now = HAL_GetTick();
-  while (Neo6m_Poll(&gps))
+  while (GpsService_Update(&gps))
   {
     SensorHealth_RecordSuccess(&gps_health, now);
-    const char *sentence = Neo6m_GetSentence(&gps);
-    UartConsole_WriteString("GPS: ");
-    UartConsole_WriteLine(sentence);
+    const char *sentence = GpsService_GetRawSentence(&gps);
     if ((sentence != NULL) && (strlen(sentence) >= 6U) &&
         (strncmp(&sentence[3], "RMC", 3U) == 0))
     {
@@ -107,7 +131,7 @@ void Application_Run(void)
   if ((gps_health.state == SENSOR_HEALTH_STALE) ||
       (gps_health.state == SENSOR_HEALTH_OFFLINE))
   {
-    Neo6m_InvalidateData(&gps);
+    GpsService_Invalidate(&gps);
   }
   if (SensorHealth_ShouldRetry(&gps_health, now))
   {
@@ -162,11 +186,11 @@ void Application_Run(void)
     const Imu_Orientation *orientation = Imu_GetOrientation(&imu);
     if ((data != NULL) && (orientation != NULL))
     {
-      /*printf("A[m/s2] %.2f %.2f %.2f | RPY[deg] %.1f %.1f %.1f | H %.1f\r\n",
+      printf("A[m/s2] %.2f %.2f %.2f | RPY[deg] %.1f %.1f %.1f | H %.1f\r\n",
              data->acceleration_mps2[0], data->acceleration_mps2[1],
              data->acceleration_mps2[2], orientation->roll_deg,
              orientation->pitch_deg, orientation->yaw_deg,
-             orientation->heading_deg);*/
+             orientation->heading_deg);
     }
   }
 }

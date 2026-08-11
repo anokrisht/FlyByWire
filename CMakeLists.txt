@@ -45,20 +45,30 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
-    Core/Src/application.c
-    Core/Src/byte_ring_buffer.c
-    Core/Src/icm20948.c
-    Core/Src/imu.c
-    Core/Src/neo6m.c
-    Core/Src/sensor_health.c
-    Core/Src/stm32_i2c_bus.c
-    Core/Src/stm32_uart_stream.c
-    Core/Src/uart_console.c
+    Application/Src/application.c
+    Drivers/GNSS/Src/nmea_parser.c
+    Drivers/ICM20948/Src/icm20948.c
+    Platform/STM32/Src/stm32_i2c_bus.c
+    Platform/STM32/Src/stm32_uart_stream.c
+    Platform/STM32/Src/uart_console.c
+    Services/Health/Src/sensor_health.c
+    Services/GPS/Src/gps_service.c
+    Services/IMU/Src/imu.c
+    Utilities/Src/byte_ring_buffer.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
+    Application/Inc
+    Drivers/GNSS/Inc
+    Drivers/ICM20948/Inc
+    Platform/Interfaces/Inc
+    Platform/STM32/Inc
+    Services/Health/Inc
+    Services/GPS/Inc
+    Services/IMU/Inc
+    Utilities/Inc
 )
 
 # Add project symbols (macros)
