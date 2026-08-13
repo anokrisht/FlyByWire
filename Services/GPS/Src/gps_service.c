@@ -435,13 +435,29 @@ static void parse_gsa(GpsService *service, const char *sentence)
 static void parse_gsv(GpsService *service, const char *sentence)
 {
   uint32_t integer;
+  uint32_t message_number;
+  uint32_t total_satellites;
   const GpsConstellation constellation = constellation_from_talker(sentence);
-  if (parse_unsigned(get_field(sentence, 2U), &integer) && (integer == 1U))
+  if (!parse_unsigned(get_field(sentence, 2U), &message_number) ||
+      !parse_unsigned(get_field(sentence, 3U), &total_satellites) ||
+      (message_number == 0U))
+  {
+    return;
+  }
+  if (message_number == 1U)
   {
     remove_visible_constellation(&service->data, constellation);
   }
 
-  for (uint8_t group = 0U; group < 4U; ++group)
+  const uint32_t first_satellite = (message_number - 1U) * 4U;
+  const uint32_t remaining =
+      (total_satellites > first_satellite)
+          ? total_satellites - first_satellite
+          : 0U;
+  const uint8_t satellites_in_message =
+      (uint8_t)((remaining > 4U) ? 4U : remaining);
+
+  for (uint8_t group = 0U; group < satellites_in_message; ++group)
   {
     const uint8_t base = (uint8_t)(4U + group * 4U);
     if (!parse_unsigned(get_field(sentence, base), &integer) ||
