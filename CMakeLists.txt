@@ -46,12 +46,14 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Application/Src/application.c
+    Drivers/BMP390/Src/bmp390.c
     Drivers/GNSS/Src/nmea_parser.c
     Drivers/ICM20948/Src/icm20948.c
     Platform/STM32/Src/stm32_i2c_bus.c
     Platform/STM32/Src/stm32_uart_stream.c
     Platform/STM32/Src/uart_console.c
     Services/Health/Src/sensor_health.c
+    Services/Barometer/Src/barometer.c
     Services/GPS/Src/gps_service.c
     Services/IMU/Src/imu.c
     Utilities/Src/byte_ring_buffer.c
@@ -61,11 +63,13 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     Application/Inc
+    Drivers/BMP390/Inc
     Drivers/GNSS/Inc
     Drivers/ICM20948/Inc
     Platform/Interfaces/Inc
     Platform/STM32/Inc
     Services/Health/Inc
+    Services/Barometer/Inc
     Services/GPS/Inc
     Services/IMU/Inc
     Utilities/Inc

@@ -6,7 +6,9 @@ and observed recovery time.
 
 ## Startup
 
-- Boot with both sensors connected: both health states reach `OK`.
+- Boot with IMU, BMP388/BMP390, and GPS connected: all health states reach `OK`.
+- Boot without the BMP390: application continues and barometer becomes `OFFLINE`.
+- Reconnect the BMP390: it reaches `OK` without resetting the STM32.
 - Boot without the IMU: application continues and IMU becomes `OFFLINE`.
 - Reconnect the IMU: it reaches `OK` without resetting the STM32.
 - Boot without the GPS: application continues; GPS becomes `STALE`/`OFFLINE`.
@@ -16,6 +18,7 @@ and observed recovery time.
 
 - Remove and reconnect I2C SDA, then SCL: no firmware lockup; IMU recovers.
 - Power-cycle only the ICM-20948: register configuration and sampling recover.
+- Power-cycle only the BMP390: calibration, configuration, and sampling recover.
 - Remove and reconnect GPS TX: NMEA reception resumes within the retry period.
 - Power-cycle only the GPS: UART reception resumes after the receiver boots.
 - Disconnect each sensor for at least 30 seconds: retry counters do not wrap or
@@ -31,6 +34,8 @@ and observed recovery time.
   and normal parsing resumes after the overload stops.
 - Move the IMU through known orientations and verify axis signs, roll, pitch,
   yaw, and heading conventions.
+- Compare BMP390 pressure and temperature with a reference; verify altitude
+  changes in the expected direction when raising and lowering the board.
 
 ## Timing and load
 

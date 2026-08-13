@@ -9,5 +9,6 @@ void Application_Init(I2C_HandleTypeDef *i2c, UART_HandleTypeDef *console_uart,
 void Application_Run(void);
 const SensorHealth *Application_GetImuHealth(void);
 const SensorHealth *Application_GetGpsHealth(void);
+const SensorHealth *Application_GetBarometerHealth(void);
 
 #endif /* APPLICATION_H */

@@ -1,5 +1,6 @@
 #include "application.h"
 
+#include "barometer.h"
 #include "imu.h"
 #include "main.h"
 #include "gps_service.h"
@@ -12,22 +13,49 @@
 #include <string.h>
 
 #define ICM20948_I2C_ADDRESS 0x68U
+#define BMP390_I2C_ADDRESS   0x76U
 #define IMU_SAMPLE_PERIOD_MS  10U
+#define BAROMETER_SAMPLE_PERIOD_MS 40U
 #define TELEMETRY_PERIOD_MS   100U
 #define IMU_STALE_TIMEOUT_MS  250U
 #define IMU_RETRY_INTERVAL_MS 1000U
+#define BAROMETER_STALE_TIMEOUT_MS 500U
+#define BAROMETER_RETRY_INTERVAL_MS 1000U
 #define GPS_STALE_TIMEOUT_MS  3000U
 #define GPS_RETRY_INTERVAL_MS 2000U
 #define SENSOR_FAILURE_LIMIT  3U
 
 static Imu imu;
+static Barometer barometer;
 static GpsService gps;
 static I2cBus imu_i2c_bus;
 static Stm32UartStream gps_uart_stream;
 static SensorHealth imu_health;
+static SensorHealth barometer_health;
 static SensorHealth gps_health;
 static uint32_t last_sample_ms;
+static uint32_t last_barometer_sample_ms;
 static uint32_t last_telemetry_ms;
+
+static Bmp390_Status initialize_barometer(void)
+{
+  const uint8_t addresses[] = {BMP390_I2C_ADDRESS,
+                               (BMP390_I2C_ADDRESS == 0x76U) ? 0x77U : 0x76U};
+  Bmp390_Status status = BMP390_ERROR_BUS;
+  for (uint32_t i = 0U; i < (sizeof(addresses) / sizeof(addresses[0])); ++i)
+  {
+    status = Barometer_Init(&barometer, &imu_i2c_bus, addresses[i]);
+    if (status == BMP390_OK)
+    {
+      printf("INFO: %s found at I2C address 0x%02X\r\n",
+             Bmp390_ModelName(&barometer.sensor), addresses[i]);
+      return status;
+    }
+    printf("WARN: BMP390 probe 0x%02X: %s (chip ID 0x%02X)\r\n",
+           addresses[i], Bmp390_StatusName(status), barometer.sensor.chip_id);
+  }
+  return status;
+}
 
 static const char *gps_fix_name(const GpsData *data, bool fix_valid)
 {
@@ -81,6 +109,8 @@ void Application_Init(I2C_HandleTypeDef *i2c, UART_HandleTypeDef *console_uart,
   const uint32_t now = HAL_GetTick();
   SensorHealth_Init(&imu_health, now, IMU_STALE_TIMEOUT_MS,
                     IMU_RETRY_INTERVAL_MS, SENSOR_FAILURE_LIMIT);
+  SensorHealth_Init(&barometer_health, now, BAROMETER_STALE_TIMEOUT_MS,
+                    BAROMETER_RETRY_INTERVAL_MS, SENSOR_FAILURE_LIMIT);
   SensorHealth_Init(&gps_health, now, GPS_STALE_TIMEOUT_MS,
                     GPS_RETRY_INTERVAL_MS, SENSOR_FAILURE_LIMIT);
   imu_i2c_bus = Stm32I2cBus_Create(i2c);
@@ -110,6 +140,15 @@ void Application_Init(I2C_HandleTypeDef *i2c, UART_HandleTypeDef *console_uart,
     UartConsole_WriteLine("WARN: ICM-20948 offline; recovery scheduled");
   }
 
+  if (initialize_barometer() == BMP390_OK)
+  {
+    SensorHealth_RecordSuccess(&barometer_health, HAL_GetTick());
+  }
+  else
+  {
+    SensorHealth_MarkOffline(&barometer_health, HAL_GetTick());
+    UartConsole_WriteLine("WARN: BMP390 offline; recovery scheduled");
+  }
   UartConsole_WriteLine("FlyByWire: sensor supervision active");
 }
 
@@ -151,12 +190,51 @@ void Application_Run(void)
     {
       SensorHealth_MarkOffline(&imu_health, HAL_GetTick());
     }
-    return;
+  }
+
+  SensorHealth_Update(&barometer_health, now);
+  if (SensorHealth_ShouldRetry(&barometer_health, now))
+  {
+    if (Barometer_Reinitialize(&barometer) == BMP390_OK)
+    {
+      SensorHealth_RecordSuccess(&barometer_health, HAL_GetTick());
+      UartConsole_WriteLine("INFO: BMP390 recovered");
+    }
+    else
+    {
+      SensorHealth_MarkOffline(&barometer_health, HAL_GetTick());
+    }
+  }
+
+  if (((barometer_health.state == SENSOR_HEALTH_OK) ||
+       (barometer_health.state == SENSOR_HEALTH_DEGRADED)) &&
+      ((uint32_t)(now - last_barometer_sample_ms) >= BAROMETER_SAMPLE_PERIOD_MS))
+  {
+    last_barometer_sample_ms = now;
+    const Bmp390_Status barometer_status = Barometer_Update(&barometer);
+    if (barometer_status == BMP390_OK)
+    {
+      SensorHealth_RecordSuccess(&barometer_health, now);
+    }
+    else if (barometer_status != BMP390_NOT_READY)
+    {
+      SensorHealth_RecordFailure(&barometer_health, now);
+      if (barometer_health.state == SENSOR_HEALTH_OFFLINE)
+      {
+        Barometer_Invalidate(&barometer);
+      }
+    }
+  }
+
+  if ((imu_health.state != SENSOR_HEALTH_OK) &&
+      (imu_health.state != SENSOR_HEALTH_DEGRADED))
+  {
+    goto telemetry;
   }
 
   if ((uint32_t)(now - last_sample_ms) < IMU_SAMPLE_PERIOD_MS)
   {
-    return;
+    goto telemetry;
   }
   last_sample_ms = now;
 
@@ -176,9 +254,10 @@ void Application_Run(void)
   }
   else
   {
-    return;
+    goto telemetry;
   }
 
+telemetry:
   if ((uint32_t)(now - last_telemetry_ms) >= TELEMETRY_PERIOD_MS)
   {
     last_telemetry_ms = now;
@@ -192,6 +271,14 @@ void Application_Run(void)
              orientation->pitch_deg, orientation->yaw_deg,
              orientation->heading_deg);
     }
+    const Bmp390_Data *barometer_data = Barometer_GetData(&barometer);
+    if (barometer_data != NULL)
+    {
+      printf("BARO %.2f hPa | %.2f C | ALT %.1f m\r\n",
+             barometer_data->pressure_pa * 0.01F,
+             barometer_data->temperature_c,
+             Barometer_GetAltitude(&barometer));
+    }
   }
 }
 
@@ -203,4 +290,9 @@ const SensorHealth *Application_GetImuHealth(void)
 const SensorHealth *Application_GetGpsHealth(void)
 {
   return &gps_health;
+}
+
+const SensorHealth *Application_GetBarometerHealth(void)
+{
+  return &barometer_health;
 }
