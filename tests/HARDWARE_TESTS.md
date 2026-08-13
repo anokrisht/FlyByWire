@@ -36,6 +36,8 @@ and observed recovery time.
   yaw, and heading conventions.
 - Compare BMP390 pressure and temperature with a reference; verify altitude
   changes in the expected direction when raising and lowering the board.
+- Boot with both pitot ports at equal pressure and verify airspeed auto-zeroes
+  near 0 m/s. Apply pressure to the positive port and verify positive airspeed.
 
 ## Timing and load
 

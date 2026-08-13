@@ -53,6 +53,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Platform/STM32/Src/stm32_uart_stream.c
     Platform/STM32/Src/uart_console.c
     Services/Health/Src/sensor_health.c
+    Services/Airspeed/Src/airspeed.c
     Services/Barometer/Src/barometer.c
     Services/GPS/Src/gps_service.c
     Services/IMU/Src/imu.c
@@ -69,6 +70,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Platform/Interfaces/Inc
     Platform/STM32/Inc
     Services/Health/Inc
+    Services/Airspeed/Inc
     Services/Barometer/Inc
     Services/GPS/Inc
     Services/IMU/Inc

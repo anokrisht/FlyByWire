@@ -1,5 +1,6 @@
 #include "application.h"
 
+#include "airspeed.h"
 #include "barometer.h"
 #include "imu.h"
 #include "main.h"
@@ -16,6 +17,7 @@
 #define BMP390_I2C_ADDRESS   0x76U
 #define IMU_SAMPLE_PERIOD_MS  10U
 #define BAROMETER_SAMPLE_PERIOD_MS 40U
+#define AIRSPEED_SAMPLE_PERIOD_MS  20U
 #define TELEMETRY_PERIOD_MS   100U
 #define IMU_STALE_TIMEOUT_MS  250U
 #define IMU_RETRY_INTERVAL_MS 1000U
@@ -27,6 +29,7 @@
 
 static Imu imu;
 static Barometer barometer;
+static Airspeed airspeed;
 static GpsService gps;
 static I2cBus imu_i2c_bus;
 static Stm32UartStream gps_uart_stream;
@@ -35,6 +38,7 @@ static SensorHealth barometer_health;
 static SensorHealth gps_health;
 static uint32_t last_sample_ms;
 static uint32_t last_barometer_sample_ms;
+static uint32_t last_airspeed_sample_ms;
 static uint32_t last_telemetry_ms;
 
 static Bmp390_Status initialize_barometer(void)
@@ -102,7 +106,8 @@ static void print_gps_fix(void)
   }
 }
 
-void Application_Init(I2C_HandleTypeDef *i2c, UART_HandleTypeDef *console_uart,
+void Application_Init(I2C_HandleTypeDef *i2c, ADC_HandleTypeDef *adc,
+                      UART_HandleTypeDef *console_uart,
                       UART_HandleTypeDef *gps_uart)
 {
   UartConsole_Init(console_uart);
@@ -148,6 +153,15 @@ void Application_Init(I2C_HandleTypeDef *i2c, UART_HandleTypeDef *console_uart,
   {
     SensorHealth_MarkOffline(&barometer_health, HAL_GetTick());
     UartConsole_WriteLine("WARN: BMP390 offline; recovery scheduled");
+  }
+  if (Airspeed_Init(&airspeed, adc) == AIRSPEED_OK)
+  {
+    printf("INFO: airspeed zero calibrated at ADC %.1f\r\n",
+           airspeed.zero_adc_counts);
+  }
+  else
+  {
+    UartConsole_WriteLine("WARN: airspeed ADC unavailable");
   }
   UartConsole_WriteLine("FlyByWire: sensor supervision active");
 }
@@ -226,6 +240,19 @@ void Application_Run(void)
     }
   }
 
+  if ((uint32_t)(now - last_airspeed_sample_ms) >= AIRSPEED_SAMPLE_PERIOD_MS)
+  {
+    last_airspeed_sample_ms = now;
+    float air_density = 1.225F;
+    const Bmp390_Data *density_data = Barometer_GetData(&barometer);
+    if ((density_data != NULL) && (density_data->pressure_pa > 0.0F))
+    {
+      air_density = density_data->pressure_pa /
+          (287.05F * (density_data->temperature_c + 273.15F));
+    }
+    (void)Airspeed_Update(&airspeed, air_density);
+  }
+
   if ((imu_health.state != SENSOR_HEALTH_OK) &&
       (imu_health.state != SENSOR_HEALTH_DEGRADED))
   {
@@ -278,6 +305,12 @@ telemetry:
              barometer_data->pressure_pa * 0.01F,
              barometer_data->temperature_c,
              Barometer_GetAltitude(&barometer));
+    }
+    if (airspeed.data_valid)
+    {
+      printf("AIR %.2f m/s | DP %.1f Pa | ADC %u\r\n",
+             airspeed.indicated_airspeed_mps,
+             airspeed.differential_pressure_pa, airspeed.raw_adc);
     }
   }
 }
