@@ -38,6 +38,10 @@ and observed recovery time.
   changes in the expected direction when raising and lowering the board.
 - Boot with both pitot ports at equal pressure and verify airspeed auto-zeroes
   near 0 m/s. Apply pressure to the positive port and verify positive airspeed.
+- Verify the airspeed startup log reports a stable zero ADC count over repeated
+  boots, and compare differential pressure against a calibrated manometer.
+- Verify the 1 kOhm series / 2 kOhm-to-ground divider keeps PA0 at or below
+  3.3 V across the full CJMCU-36 output range.
 
 ## Timing and load
 

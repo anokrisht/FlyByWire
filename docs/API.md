@@ -11,9 +11,11 @@ files.
 main
   -> application
       -> IMU service -> ICM-20948 driver -> generic I2C bus -> STM32 HAL
+      -> barometer service -> BMP388/BMP390 driver -> generic I2C bus
+      -> airspeed service -> STM32 ADC HAL
       -> NMEA driver -> generic byte stream -> STM32 UART HAL
       -> UART console -> STM32 UART HAL
-      -> sensor-health supervisor
+      -> sensor supervision -> sensor-health state machines
 ```
 
 `Core/Src/main.c` owns generated peripheral initialization.
@@ -28,19 +30,22 @@ Header: `application.h`
 
 ```c
 void Application_Init(I2C_HandleTypeDef *i2c,
+                      ADC_HandleTypeDef *adc,
                       UART_HandleTypeDef *console_uart,
                       UART_HandleTypeDef *gps_uart);
 ```
 
-Attaches I2C1, the USART2 console, and the USART1 GPS receiver. It initializes
-sensor supervision and schedules recovery when hardware is unavailable. Call it
-once after CubeMX has initialized all three peripherals.
+Attaches I2C1, ADC1 channel 0, the USART2 console, and the USART1 GPS receiver.
+It initializes sensor supervision and schedules recovery when hardware is
+unavailable. Keep both pitot ports at equal pressure while it auto-zeroes the
+airspeed sensor. Call it once after CubeMX initializes these peripherals.
 
 ```c
 MX_I2C1_Init();
+MX_ADC1_Init();
 MX_USART2_UART_Init();
 MX_USART1_UART_Init();
-Application_Init(&hi2c1, &huart2, &huart1);
+Application_Init(&hi2c1, &hadc1, &huart2, &huart1);
 ```
 
 ### `Application_Run`
@@ -65,6 +70,7 @@ while (1)
 ```c
 const SensorHealth *Application_GetImuHealth(void);
 const SensorHealth *Application_GetGpsHealth(void);
+const SensorHealth *Application_GetBarometerHealth(void);
 ```
 
 Return read-only health information. Never modify the returned objects.
@@ -314,7 +320,77 @@ void GpsService_Invalidate(GpsService *service);
 Call this after a transport timeout so old coordinates are not treated as a
 current fix. The application supervisor already does this automatically.
 
-## Sensor health supervisor
+## BMP388/BMP390 driver
+
+Header: `bmp390.h`
+
+```c
+Bmp390_Status Bmp390_Init(Bmp390 *device, const I2cBus *bus,
+                          uint8_t address);
+Bmp390_Status Bmp390_Read(Bmp390 *device, Bmp390_Data *data);
+const char *Bmp390_StatusName(Bmp390_Status status);
+const char *Bmp390_ModelName(const Bmp390 *device);
+```
+
+`Bmp390_Init` accepts address `0x76` or `0x77`, validates BMP388 chip ID `0x50`
+or BMP390 chip ID `0x60`, loads factory calibration, and starts normal-mode
+sampling. `Bmp390_Read` returns compensated pressure in Pa and temperature in
+degrees Celsius, or `BMP390_NOT_READY` when a new pair is unavailable.
+
+## Barometer service
+
+Header: `barometer.h`
+
+```c
+Bmp390_Status Barometer_Init(Barometer *barometer, const I2cBus *bus,
+                             uint8_t address);
+Bmp390_Status Barometer_Reinitialize(Barometer *barometer);
+Bmp390_Status Barometer_Update(Barometer *barometer);
+const Bmp390_Data *Barometer_GetData(const Barometer *barometer);
+float Barometer_GetAltitude(const Barometer *barometer);
+void Barometer_SetSeaLevelPressure(Barometer *barometer, float pressure_pa);
+void Barometer_Invalidate(Barometer *barometer);
+```
+
+Altitude uses the pressure-altitude equation and defaults to `101325 Pa` sea
+level pressure. Set the local QNH through `Barometer_SetSeaLevelPressure` for a
+more useful altitude. Getters are valid only after a successful update.
+
+## Analog airspeed service
+
+Header: `airspeed.h`
+
+```c
+Airspeed_Status Airspeed_Init(Airspeed *airspeed, ADC_HandleTypeDef *adc);
+Airspeed_Status Airspeed_Update(Airspeed *airspeed,
+                                float air_density_kg_m3);
+void Airspeed_Invalidate(Airspeed *airspeed);
+```
+
+The configured CJMCU-36 interface assumes a 5 V MPXV7002 output connected to
+PA0 through a divider with `1 kOhm` from the sensor to PA0 and `2 kOhm` from
+PA0 to ground. `Airspeed_Init` averages 128 samples to establish zero pressure;
+keep both ports at equal pressure during startup. `Airspeed_Update` averages 16
+samples, calculates differential pressure, clamps negative dynamic pressure to
+zero for speed, and calculates indicated airspeed from the supplied air density.
+
+## Application sensor supervision
+
+Header: `sensor_supervision.h`
+
+Application code normally calls only:
+
+```c
+SensorSupervision_Check(&sensor_supervision, HAL_GetTick());
+```
+
+Sampling paths report `SENSOR_SAMPLE_SUCCESS`, `SENSOR_SAMPLE_NOT_READY`, or
+`SENSOR_SAMPLE_FAILURE` through `SensorSupervision_Report`. The supervisor owns
+stale detection, invalidation, retry timing, GPS UART recovery, and IMU/barometer
+reinitialization. `SensorSupervision_IsOperational` indicates whether sampling
+should proceed; `SensorSupervision_GetHealth` exposes read-only diagnostics.
+
+## Sensor health state machine
 
 Header: `sensor_health.h`
 
