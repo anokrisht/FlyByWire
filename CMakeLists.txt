@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Application/Src/application.c
+    Application/Src/sensor_supervision.c
     Drivers/BMP390/Src/bmp390.c
     Drivers/GNSS/Src/nmea_parser.c
     Drivers/ICM20948/Src/icm20948.c

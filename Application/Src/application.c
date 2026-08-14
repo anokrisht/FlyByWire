@@ -5,7 +5,7 @@
 #include "imu.h"
 #include "main.h"
 #include "gps_service.h"
-#include "sensor_health.h"
+#include "sensor_supervision.h"
 #include "stm32_i2c_bus.h"
 #include "stm32_uart_stream.h"
 #include "uart_console.h"
@@ -19,13 +19,6 @@
 #define BAROMETER_SAMPLE_PERIOD_MS 40U
 #define AIRSPEED_SAMPLE_PERIOD_MS  20U
 #define TELEMETRY_PERIOD_MS   100U
-#define IMU_STALE_TIMEOUT_MS  250U
-#define IMU_RETRY_INTERVAL_MS 1000U
-#define BAROMETER_STALE_TIMEOUT_MS 500U
-#define BAROMETER_RETRY_INTERVAL_MS 1000U
-#define GPS_STALE_TIMEOUT_MS  3000U
-#define GPS_RETRY_INTERVAL_MS 2000U
-#define SENSOR_FAILURE_LIMIT  3U
 
 static Imu imu;
 static Barometer barometer;
@@ -33,9 +26,7 @@ static Airspeed airspeed;
 static GpsService gps;
 static I2cBus imu_i2c_bus;
 static Stm32UartStream gps_uart_stream;
-static SensorHealth imu_health;
-static SensorHealth barometer_health;
-static SensorHealth gps_health;
+static SensorSupervision sensor_supervision;
 static uint32_t last_sample_ms;
 static uint32_t last_barometer_sample_ms;
 static uint32_t last_airspeed_sample_ms;
@@ -106,18 +97,53 @@ static void print_gps_fix(void)
   }
 }
 
+static void print_imu(void)
+{
+  const Icm20948_Data *data = Imu_GetData(&imu);
+  const Imu_Orientation *orientation = Imu_GetOrientation(&imu);
+  if ((data == NULL) || (orientation == NULL))
+  {
+    return;
+  }
+
+  printf("A[m/s2] %.2f %.2f %.2f | RPY[deg] %.1f %.1f %.1f | H %.1f\r\n",
+         data->acceleration_mps2[0], data->acceleration_mps2[1],
+         data->acceleration_mps2[2], orientation->roll_deg,
+         orientation->pitch_deg, orientation->yaw_deg,
+         orientation->heading_deg);
+}
+
+static void print_altitude(void)
+{
+  const Bmp390_Data *data = Barometer_GetData(&barometer);
+  if (data == NULL)
+  {
+    return;
+  }
+
+  printf("BARO %.2f hPa | %.2f C | ALT %.1f m\r\n",
+         data->pressure_pa * 0.01F, data->temperature_c,
+         Barometer_GetAltitude(&barometer));
+}
+
+static void print_airspeed(void)
+{
+  if (!airspeed.data_valid)
+  {
+    return;
+  }
+
+  printf("AIR %.2f m/s | DP %.1f Pa | ADC %u\r\n",
+         airspeed.indicated_airspeed_mps, airspeed.differential_pressure_pa,
+         airspeed.raw_adc);
+}
+
 void Application_Init(I2C_HandleTypeDef *i2c, ADC_HandleTypeDef *adc,
                       UART_HandleTypeDef *console_uart,
                       UART_HandleTypeDef *gps_uart)
 {
   UartConsole_Init(console_uart);
   const uint32_t now = HAL_GetTick();
-  SensorHealth_Init(&imu_health, now, IMU_STALE_TIMEOUT_MS,
-                    IMU_RETRY_INTERVAL_MS, SENSOR_FAILURE_LIMIT);
-  SensorHealth_Init(&barometer_health, now, BAROMETER_STALE_TIMEOUT_MS,
-                    BAROMETER_RETRY_INTERVAL_MS, SENSOR_FAILURE_LIMIT);
-  SensorHealth_Init(&gps_health, now, GPS_STALE_TIMEOUT_MS,
-                    GPS_RETRY_INTERVAL_MS, SENSOR_FAILURE_LIMIT);
   imu_i2c_bus = Stm32I2cBus_Create(i2c);
 
   const bool gps_uart_started =
@@ -131,29 +157,25 @@ void Application_Init(I2C_HandleTypeDef *i2c, ADC_HandleTypeDef *adc,
   }
   if (!gps_uart_started)
   {
-    SensorHealth_MarkOffline(&gps_health, now);
     UartConsole_WriteLine("WARN: GPS UART offline; recovery scheduled");
   }
 
-  if (Imu_Init(&imu, &imu_i2c_bus, ICM20948_I2C_ADDRESS) == ICM20948_OK)
+  const bool imu_online =
+      Imu_Init(&imu, &imu_i2c_bus, ICM20948_I2C_ADDRESS) == ICM20948_OK;
+  if (!imu_online)
   {
-    SensorHealth_RecordSuccess(&imu_health, HAL_GetTick());
-  }
-  else
-  {
-    SensorHealth_MarkOffline(&imu_health, HAL_GetTick());
     UartConsole_WriteLine("WARN: ICM-20948 offline; recovery scheduled");
   }
 
-  if (initialize_barometer() == BMP390_OK)
+  const bool barometer_online = initialize_barometer() == BMP390_OK;
+  if (!barometer_online)
   {
-    SensorHealth_RecordSuccess(&barometer_health, HAL_GetTick());
-  }
-  else
-  {
-    SensorHealth_MarkOffline(&barometer_health, HAL_GetTick());
     UartConsole_WriteLine("WARN: BMP390 offline; recovery scheduled");
   }
+
+  SensorSupervision_Init(&sensor_supervision, &imu, &barometer, &gps,
+                         &gps_uart_stream, now, imu_online, barometer_online,
+                         gps_uart_started);
   if (Airspeed_Init(&airspeed, adc) == AIRSPEED_OK)
   {
     printf("INFO: airspeed zero calibrated at ADC %.1f\r\n",
@@ -171,72 +193,33 @@ void Application_Run(void)
   uint32_t now = HAL_GetTick();
   while (GpsService_Update(&gps))
   {
-    SensorHealth_RecordSuccess(&gps_health, now);
+    SensorSupervision_Report(&sensor_supervision, SUPERVISED_GPS,
+                             SENSOR_SAMPLE_SUCCESS, now);
     const char *sentence = GpsService_GetRawSentence(&gps);
     if ((sentence != NULL) && (strlen(sentence) >= 6U) &&
         (strncmp(&sentence[3], "RMC", 3U) == 0))
     {
-      print_gps_fix();
+      //print_gps_fix();
     }
   }
 
-  SensorHealth_Update(&gps_health, now);
-  if ((gps_health.state == SENSOR_HEALTH_STALE) ||
-      (gps_health.state == SENSOR_HEALTH_OFFLINE))
-  {
-    GpsService_Invalidate(&gps);
-  }
-  if (SensorHealth_ShouldRetry(&gps_health, now))
-  {
-    (void)Stm32UartStream_Recover(&gps_uart_stream);
-    SensorHealth_MarkOffline(&gps_health, now);
-  }
+  SensorSupervision_Check(&sensor_supervision, now);
 
-  SensorHealth_Update(&imu_health, now);
-  if (SensorHealth_ShouldRetry(&imu_health, now))
-  {
-    if (Imu_Reinitialize(&imu) == ICM20948_OK)
-    {
-      SensorHealth_RecordSuccess(&imu_health, HAL_GetTick());
-      UartConsole_WriteLine("INFO: ICM-20948 recovered");
-    }
-    else
-    {
-      SensorHealth_MarkOffline(&imu_health, HAL_GetTick());
-    }
-  }
-
-  SensorHealth_Update(&barometer_health, now);
-  if (SensorHealth_ShouldRetry(&barometer_health, now))
-  {
-    if (Barometer_Reinitialize(&barometer) == BMP390_OK)
-    {
-      SensorHealth_RecordSuccess(&barometer_health, HAL_GetTick());
-      UartConsole_WriteLine("INFO: BMP390 recovered");
-    }
-    else
-    {
-      SensorHealth_MarkOffline(&barometer_health, HAL_GetTick());
-    }
-  }
-
-  if (((barometer_health.state == SENSOR_HEALTH_OK) ||
-       (barometer_health.state == SENSOR_HEALTH_DEGRADED)) &&
+  if (SensorSupervision_IsOperational(&sensor_supervision,
+                                      SUPERVISED_BAROMETER) &&
       ((uint32_t)(now - last_barometer_sample_ms) >= BAROMETER_SAMPLE_PERIOD_MS))
   {
     last_barometer_sample_ms = now;
     const Bmp390_Status barometer_status = Barometer_Update(&barometer);
     if (barometer_status == BMP390_OK)
     {
-      SensorHealth_RecordSuccess(&barometer_health, now);
+      SensorSupervision_Report(&sensor_supervision, SUPERVISED_BAROMETER,
+                               SENSOR_SAMPLE_SUCCESS, now);
     }
     else if (barometer_status != BMP390_NOT_READY)
     {
-      SensorHealth_RecordFailure(&barometer_health, now);
-      if (barometer_health.state == SENSOR_HEALTH_OFFLINE)
-      {
-        Barometer_Invalidate(&barometer);
-      }
+      SensorSupervision_Report(&sensor_supervision, SUPERVISED_BAROMETER,
+                               SENSOR_SAMPLE_FAILURE, now);
     }
   }
 
@@ -253,8 +236,7 @@ void Application_Run(void)
     (void)Airspeed_Update(&airspeed, air_density);
   }
 
-  if ((imu_health.state != SENSOR_HEALTH_OK) &&
-      (imu_health.state != SENSOR_HEALTH_DEGRADED))
+  if (!SensorSupervision_IsOperational(&sensor_supervision, SUPERVISED_IMU))
   {
     goto telemetry;
   }
@@ -268,15 +250,13 @@ void Application_Run(void)
   const Icm20948_Status status = Imu_Update(&imu, now);
   if (status == ICM20948_OK)
   {
-    SensorHealth_RecordSuccess(&imu_health, now);
+    SensorSupervision_Report(&sensor_supervision, SUPERVISED_IMU,
+                             SENSOR_SAMPLE_SUCCESS, now);
   }
   else if (status != ICM20948_NOT_READY)
   {
-    SensorHealth_RecordFailure(&imu_health, now);
-    if (imu_health.state == SENSOR_HEALTH_OFFLINE)
-    {
-      Imu_Invalidate(&imu);
-    }
+    SensorSupervision_Report(&sensor_supervision, SUPERVISED_IMU,
+                             SENSOR_SAMPLE_FAILURE, now);
     return;
   }
   else
@@ -288,44 +268,24 @@ telemetry:
   if ((uint32_t)(now - last_telemetry_ms) >= TELEMETRY_PERIOD_MS)
   {
     last_telemetry_ms = now;
-    const Icm20948_Data *data = Imu_GetData(&imu);
-    const Imu_Orientation *orientation = Imu_GetOrientation(&imu);
-    if ((data != NULL) && (orientation != NULL))
-    {
-      printf("A[m/s2] %.2f %.2f %.2f | RPY[deg] %.1f %.1f %.1f | H %.1f\r\n",
-             data->acceleration_mps2[0], data->acceleration_mps2[1],
-             data->acceleration_mps2[2], orientation->roll_deg,
-             orientation->pitch_deg, orientation->yaw_deg,
-             orientation->heading_deg);
-    }
-    const Bmp390_Data *barometer_data = Barometer_GetData(&barometer);
-    if (barometer_data != NULL)
-    {
-      printf("BARO %.2f hPa | %.2f C | ALT %.1f m\r\n",
-             barometer_data->pressure_pa * 0.01F,
-             barometer_data->temperature_c,
-             Barometer_GetAltitude(&barometer));
-    }
-    if (airspeed.data_valid)
-    {
-      printf("AIR %.2f m/s | DP %.1f Pa | ADC %u\r\n",
-             airspeed.indicated_airspeed_mps,
-             airspeed.differential_pressure_pa, airspeed.raw_adc);
-    }
+    //print_imu();
+    //print_altitude();
+    print_airspeed();
   }
 }
 
 const SensorHealth *Application_GetImuHealth(void)
 {
-  return &imu_health;
+  return SensorSupervision_GetHealth(&sensor_supervision, SUPERVISED_IMU);
 }
 
 const SensorHealth *Application_GetGpsHealth(void)
 {
-  return &gps_health;
+  return SensorSupervision_GetHealth(&sensor_supervision, SUPERVISED_GPS);
 }
 
 const SensorHealth *Application_GetBarometerHealth(void)
 {
-  return &barometer_health;
+  return SensorSupervision_GetHealth(&sensor_supervision,
+                                     SUPERVISED_BAROMETER);
 }
