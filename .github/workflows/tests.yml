@@ -25,3 +25,97 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build/host-tests --output-on-failure
+
+  ground-station-tests:
+    name: Ground station tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            GroundStation/requirements.txt
+            GroundStation/requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r GroundStation/requirements-dev.txt
+
+      - name: Check Python syntax
+        run: python -m compileall -q GroundStation
+
+      - name: Lint Python
+        run: python -m ruff check --select E9,F63,F7,F82 GroundStation
+
+      - name: Run Python tests
+        run: python -m pytest -q GroundStation/tests
+
+      - name: Validate GUI imports headlessly
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -c "import sys; sys.path.insert(0, 'GroundStation'); import dashboard, main, receiver"
+
+  firmware-build:
+    name: ARM firmware build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi ninja-build
+
+      - name: Configure firmware
+        run: cmake --preset Debug
+
+      - name: Build firmware
+        run: cmake --build --preset Debug --parallel
+
+      - name: Create binary and report size
+        run: |
+          arm-none-eabi-objcopy -O binary build/Debug/FlyByWire.elf build/Debug/FlyByWire.bin
+          arm-none-eabi-size build/Debug/FlyByWire.elf
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlyByWire-firmware
+          path: |
+            build/Debug/FlyByWire.elf
+            build/Debug/FlyByWire.bin
+            build/Debug/FlyByWire.map
+          if-no-files-found: error
+
+  tagged-release:
+    name: Publish tagged firmware
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [host-tests, ground-station-tests, firmware-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FlyByWire-firmware
+          path: release
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" release/* --generate-notes

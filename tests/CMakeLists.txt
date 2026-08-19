@@ -32,3 +32,17 @@ else()
 endif()
 
 add_test(NAME flybywire_tests COMMAND flybywire_tests)
+
+add_executable(mavlink_encoder_tests
+    test_mavlink_encoder.c
+    ../Services/Telemetry/Src/mavlink_encoder.c
+)
+target_include_directories(mavlink_encoder_tests PRIVATE
+    ../Services/Telemetry/Inc
+)
+if(MSVC)
+  target_compile_options(mavlink_encoder_tests PRIVATE /W4 /WX)
+else()
+  target_compile_options(mavlink_encoder_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME mavlink_encoder_tests COMMAND mavlink_encoder_tests)

@@ -3,6 +3,16 @@
 This desktop application displays telemetry from any MAVLink-compatible flight
 controller over a serial port or UDP. It is not tied to the STM32 firmware.
 
+## Screenshots
+
+### Flight instruments
+
+![FlyByWire flight instruments](<../.images/Dashboard - flight instruments .png>)
+
+### GPS map
+
+![FlyByWire GPS map](<../.images/Dashboard - GPS maps.png>)
+
 ## Install and run
 
 Python 3.11 or 3.12 is recommended. From the repository root on Windows:
@@ -36,6 +46,23 @@ python GroundStation/simulator.py
 
 The simulator traces a moving attitude, air data, 9-axis IMU values, and a
 circular GPS ground track.
+
+## Recording and analysis
+
+Use **Start recording** in the header to choose a CSV file. The button turns
+red while recording; **Stop recording** closes and saves the file. Each row
+contains computer UTC, link/alert state, attitude, air data, both temperatures,
+9-axis IMU values, and GPS values. The file is flushed continuously so most
+data remains usable if the program closes unexpectedly.
+
+The **Flight statistics** tab tracks session duration, GPS distance travelled,
+maximum airspeed and ground speed, pressure-altitude range, ambient-temperature
+range, and sample count. Statistics can be reset independently of recording.
+
+The **Calibration** tab provides a five-second stationary accelerometer, gyro,
+and differential-pressure-zero measurement plus a rotate-through-all-axes
+magnetometer calibration. Results can be saved as JSON. This assistant computes
+calibration values but does not yet write them back to the microcontroller.
 
 ## MAVLink contract for a microcontroller
 

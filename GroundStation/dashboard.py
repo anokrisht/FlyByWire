@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime
+import json
 import math
+import time
 
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QPlainTextEdit, QPushButton, QTabWidget,
-    QVBoxLayout, QWidget,
+    QFileDialog, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
+    QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 try:
@@ -22,6 +25,10 @@ except ImportError:  # Keep the offline ground-track plot available.
     QWebEngineView = None
 
 from receiver import MavlinkReceiver
+from session_data import (
+    CsvRecorder, FlightStatistics, calculate_magnetometer_calibration,
+    calculate_stationary_calibration,
+)
 from telemetry import TelemetryState
 
 
@@ -211,10 +218,117 @@ class HistoryPlot(pg.PlotWidget):
             curve.setData(x, list(history))
 
 
+class CalibrationAssistant(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mode: str | None = None
+        self.deadline = 0.0
+        self.samples: list[dict[str, list[float] | float]] = []
+        self.results: dict[str, object] = {}
+        layout = QVBoxLayout(self)
+        instructions = QLabel(
+            "Stationary calibration: keep the unit level and motionless for 5 seconds.\n"
+            "Magnetometer calibration: rotate the unit slowly through every orientation, "
+            "then press Finish. Results are saved as a report; they are not written "
+            "to the flight controller automatically.")
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+        buttons = QHBoxLayout()
+        stationary = QPushButton("Start stationary calibration (5 s)")
+        stationary.clicked.connect(self.start_stationary)
+        self.mag_button = QPushButton("Start magnetometer calibration")
+        self.mag_button.clicked.connect(self.toggle_magnetometer)
+        save = QPushButton("Save calibration report")
+        save.clicked.connect(self.save_report)
+        buttons.addWidget(stationary); buttons.addWidget(self.mag_button)
+        buttons.addWidget(save)
+        layout.addLayout(buttons)
+        self.progress = QLabel("Ready")
+        self.output = QPlainTextEdit()
+        self.output.setReadOnly(True)
+        layout.addWidget(self.progress)
+        layout.addWidget(self.output, 1)
+
+    def start_stationary(self) -> None:
+        self.mode = "stationary"
+        self.deadline = time.monotonic() + 5.0
+        self.samples.clear()
+        self.progress.setText("Collecting stationary samples…")
+
+    def toggle_magnetometer(self) -> None:
+        if self.mode == "magnetometer":
+            self._finish_magnetometer()
+            return
+        self.mode = "magnetometer"
+        self.samples.clear()
+        self.mag_button.setText("Finish magnetometer calibration")
+        self.progress.setText("Rotate through all orientations…")
+
+    def sample(self, state: TelemetryState) -> None:
+        if self.mode is None:
+            return
+        if any(math.isnan(value) for value in state.acceleration_mps2 +
+               state.angular_rate_rps + state.magnetic_field_gauss):
+            self.progress.setText("Waiting for valid IMU telemetry…")
+            return
+        self.samples.append({
+            "acceleration": list(state.acceleration_mps2),
+            "gyro": list(state.angular_rate_rps),
+            "magnetic": list(state.magnetic_field_gauss),
+            "differential_pressure_hpa": state.differential_pressure_hpa,
+        })
+        if self.mode == "stationary":
+            remaining = max(0.0, self.deadline - time.monotonic())
+            self.progress.setText(f"Collecting… {remaining:.1f} s remaining")
+            if remaining <= 0.0:
+                self._finish_stationary()
+        else:
+            self.progress.setText(
+                f"Rotate through all orientations… {len(self.samples)} samples")
+
+    def _finish_stationary(self) -> None:
+        if not self.samples:
+            self.progress.setText("No valid samples collected")
+            self.mode = None
+            return
+        self.results["stationary"] = calculate_stationary_calibration(
+            self.samples)
+        self.mode = None
+        self.progress.setText("Stationary calibration complete")
+        self._show_results()
+
+    def _finish_magnetometer(self) -> None:
+        self.mode = None
+        self.mag_button.setText("Start magnetometer calibration")
+        if len(self.samples) < 20:
+            self.progress.setText("Not enough magnetometer samples")
+            return
+        self.results["magnetometer"] = calculate_magnetometer_calibration(
+            self.samples)
+        self.progress.setText("Magnetometer calibration complete")
+        self._show_results()
+
+    def _show_results(self) -> None:
+        self.output.setPlainText(json.dumps(self.results, indent=2))
+
+    def save_report(self) -> None:
+        if not self.results:
+            QMessageBox.information(self, "Calibration", "No calibration results yet.")
+            return
+        default = f"calibration-{datetime.now():%Y%m%d-%H%M%S}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save calibration report", default, "JSON files (*.json)")
+        if path:
+            with open(path, "w", encoding="utf-8") as report:
+                json.dump(self.results, report, indent=2)
+
+
 class Dashboard(QMainWindow):
     def __init__(self, initial_endpoint: str, initial_baud: int) -> None:
         super().__init__()
         self.state = TelemetryState()
+        self.recorder = CsvRecorder()
+        self.flight_statistics = FlightStatistics()
         self.receiver: MavlinkReceiver | None = None
         self.started_at = 0.0
         self.last_plotted_message = 0
@@ -230,6 +344,9 @@ class Dashboard(QMainWindow):
         self.tabs.addTab(self._imu_tab(), "IMU graphs")
         self.tabs.addTab(self._environment_tab(), "Air data")
         self.tabs.addTab(self._gps_tab(), "GPS track")
+        self.tabs.addTab(self._statistics_tab(), "Flight statistics")
+        self.calibration = CalibrationAssistant()
+        self.tabs.addTab(self.calibration, "Calibration")
         self.tabs.addTab(self._status_tab(), "Link status")
         layout.addWidget(self.tabs)
         self.setCentralWidget(root)
@@ -247,6 +364,8 @@ class Dashboard(QMainWindow):
         self.baud.setCurrentText(str(baud))
         self.connect_button = QPushButton("Connect")
         self.connect_button.clicked.connect(self.toggle_connection)
+        self.record_button = QPushButton("Start recording")
+        self.record_button.clicked.connect(self.toggle_recording)
         self.link_label = QLabel("DISCONNECTED")
         self.link_label.setStyleSheet("color: #ff7066; font-weight: bold")
         self.status_lamps = StatusLamps()
@@ -255,6 +374,7 @@ class Dashboard(QMainWindow):
         layout.addWidget(QLabel("Baud"))
         layout.addWidget(self.baud)
         layout.addWidget(self.connect_button)
+        layout.addWidget(self.record_button)
         layout.addWidget(self.link_label)
         layout.addWidget(self.status_lamps)
         return layout
@@ -354,6 +474,48 @@ class Dashboard(QMainWindow):
         for name, label in self.status_values.items(): form.addRow(name, label)
         return tab
 
+    def _statistics_tab(self) -> QWidget:
+        tab = QWidget(); layout = QVBoxLayout(tab)
+        form_box = QGroupBox("Current flight session")
+        form = QFormLayout(form_box)
+        names = (
+            "Duration", "Distance travelled", "Maximum airspeed",
+            "Maximum ground speed", "Minimum pressure altitude",
+            "Maximum pressure altitude", "Minimum ambient temperature",
+            "Maximum ambient temperature", "Recorded samples",
+        )
+        self.statistics_values = {name: QLabel("---") for name in names}
+        for name, label in self.statistics_values.items():
+            label.setStyleSheet("font-size: 18px; font-weight: 600")
+            form.addRow(name, label)
+        reset = QPushButton("Reset flight statistics")
+        reset.clicked.connect(self.flight_statistics.reset)
+        layout.addWidget(form_box); layout.addWidget(reset)
+        layout.addStretch(1)
+        return tab
+
+    def toggle_recording(self) -> None:
+        if self.recorder.active:
+            saved_path = self.recorder.stop()
+            self.record_button.setText("Start recording")
+            self.record_button.setStyleSheet("")
+            if saved_path is not None:
+                QMessageBox.information(self, "Recording saved", str(saved_path))
+            return
+        default = f"flight-{datetime.now():%Y%m%d-%H%M%S}.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Start CSV recording", default, "CSV files (*.csv)")
+        if not path:
+            return
+        try:
+            self.recorder.start(path)
+        except OSError as error:
+            QMessageBox.critical(self, "Recording error", str(error))
+            return
+        self.record_button.setText("Stop recording")
+        self.record_button.setStyleSheet(
+            "background: #b62f3a; color: white; font-weight: bold")
+
     def toggle_connection(self) -> None:
         if self.receiver is not None:
             self.receiver.stop(); self.receiver = None
@@ -411,10 +573,21 @@ class Dashboard(QMainWindow):
         self.status_values["Heartbeat status"].setText(str(self.state.system_status))
         self.status_values["Message rates"].setText("  ".join(
             f"{name}: {rate:.1f} Hz" for name, rate in sorted(self.state.message_rates.items())))
+        self._refresh_statistics_display()
 
         if self.state.message_count == self.last_plotted_message:
             return
         self.last_plotted_message = self.state.message_count
+        self.flight_statistics.update(self.state)
+        self.calibration.sample(self.state)
+        if self.recorder.active:
+            try:
+                self.recorder.append(self.state)
+            except OSError as error:
+                self.recorder.stop()
+                self.record_button.setText("Start recording")
+                QMessageBox.critical(self, "Recording stopped", str(error))
+        self._refresh_statistics_display()
         timestamp = time.monotonic()
         self.accel_plot.append(timestamp, self.state.acceleration_mps2)
         self.gyro_plot.append(timestamp, self.state.angular_rate_rps)
@@ -455,6 +628,32 @@ class Dashboard(QMainWindow):
     def _set_box(self, box: QGroupBox, value: float, unit: str) -> None:
         box.findChild(QLabel, "value").setText(f"{self._number(value)} {unit}")
 
+    def _refresh_statistics_display(self) -> None:
+        statistics = self.flight_statistics
+        duration = int(statistics.duration_s)
+        self.statistics_values["Duration"].setText(
+            f"{duration // 3600:02d}:{(duration // 60) % 60:02d}:{duration % 60:02d}")
+        self.statistics_values["Distance travelled"].setText(
+            f"{statistics.distance_m:.1f} m")
+        values = {
+            "Maximum airspeed": (statistics.maximum_airspeed_mps, "m/s"),
+            "Maximum ground speed": (statistics.maximum_ground_speed_mps, "m/s"),
+            "Minimum pressure altitude":
+                (statistics.minimum_pressure_altitude_m, "m"),
+            "Maximum pressure altitude":
+                (statistics.maximum_pressure_altitude_m, "m"),
+            "Minimum ambient temperature":
+                (statistics.minimum_temperature_c, "°C"),
+            "Maximum ambient temperature":
+                (statistics.maximum_temperature_c, "°C"),
+        }
+        for name, (value, unit) in values.items():
+            self.statistics_values[name].setText(
+                f"{self._number(value, 2)} {unit}")
+        self.statistics_values["Recorded samples"].setText(
+            str(statistics.sample_count))
+
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
         if self.receiver is not None: self.receiver.stop()
+        self.recorder.stop()
         event.accept()

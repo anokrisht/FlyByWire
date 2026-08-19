@@ -1,5 +1,7 @@
 # FlyByWire
 
+[![Tests](https://github.com/anokrisht/FlyByWire/actions/workflows/tests.yml/badge.svg)](https://github.com/anokrisht/FlyByWire/actions/workflows/tests.yml)
+
 STM32F446-based sensor platform with an ICM-20948 IMU, BMP388/BMP390
 barometer, analog differential-pressure airspeed sensor, NMEA GNSS receiver,
 UART telemetry, automatic sensor recovery, and host-side unit tests.

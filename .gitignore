@@ -1,5 +1,6 @@
 build
 GroundStation/.venv/
 GroundStation/__pycache__/
+GroundStation/**/__pycache__/
 mx.scratch
 !.settings
