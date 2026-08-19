@@ -1,6 +1,7 @@
 #ifndef I2C_BUS_H
 #define I2C_BUS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -22,6 +23,13 @@ struct I2cBus
                                    uint8_t reg, const uint8_t *data,
                                    size_t length);
   void (*delay_ms)(uint32_t delay_ms);
+  /** Reset the controller and release a bus left busy by an interrupted transfer. */
+  bool (*recover)(void *context);
 };
+
+static inline bool I2cBus_Recover(const I2cBus *bus)
+{
+  return (bus != NULL) && (bus->recover != NULL) && bus->recover(bus->context);
+}
 
 #endif /* I2C_BUS_H */

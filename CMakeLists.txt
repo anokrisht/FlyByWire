@@ -46,7 +46,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Application/Src/application.c
-    Application/Src/sensor_supervision.c
+    Application/DataAcquisition/Src/data_acquisition.c
+    Application/DataAcquisition/Src/sensor_supervision.c
     Drivers/BMP390/Src/bmp390.c
     Drivers/GNSS/Src/nmea_parser.c
     Drivers/ICM20948/Src/icm20948.c
@@ -58,6 +59,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Services/Barometer/Src/barometer.c
     Services/GPS/Src/gps_service.c
     Services/IMU/Src/imu.c
+    Services/Telemetry/Src/mavlink_encoder.c
+    Services/Telemetry/Src/mavlink_telemetry.c
     Utilities/Src/byte_ring_buffer.c
 )
 
@@ -65,6 +68,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     Application/Inc
+    Application/DataAcquisition/Inc
     Drivers/BMP390/Inc
     Drivers/GNSS/Inc
     Drivers/ICM20948/Inc
@@ -75,6 +79,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Services/Barometer/Inc
     Services/GPS/Inc
     Services/IMU/Inc
+    Services/Telemetry/Inc
     Utilities/Inc
 )
 

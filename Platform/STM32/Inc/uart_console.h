@@ -7,6 +7,7 @@ extern "C" {
 
 #include "stm32f4xx_hal.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -15,6 +16,9 @@ extern "C" {
 
 /** Attach the console to an initialized UART peripheral. */
 void UartConsole_Init(UART_HandleTypeDef *uart);
+
+/** Enable or silence console output when the UART is used by a binary protocol. */
+void UartConsole_SetOutputEnabled(bool enabled);
 
 /** Transmit an arbitrary byte buffer. */
 HAL_StatusTypeDef UartConsole_Write(const uint8_t *data, size_t length);

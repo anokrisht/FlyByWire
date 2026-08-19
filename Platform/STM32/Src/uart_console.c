@@ -4,10 +4,17 @@
 #include <string.h>
 
 static UART_HandleTypeDef *console_uart;
+static bool output_enabled = true;
 
 void UartConsole_Init(UART_HandleTypeDef *uart)
 {
   console_uart = uart;
+  output_enabled = true;
+}
+
+void UartConsole_SetOutputEnabled(bool enabled)
+{
+  output_enabled = enabled;
 }
 
 HAL_StatusTypeDef UartConsole_Write(const uint8_t *data, size_t length)
@@ -15,6 +22,10 @@ HAL_StatusTypeDef UartConsole_Write(const uint8_t *data, size_t length)
   if ((console_uart == NULL) || ((data == NULL) && (length != 0U)))
   {
     return HAL_ERROR;
+  }
+  if (!output_enabled)
+  {
+    return HAL_OK;
   }
 
   while (length != 0U)

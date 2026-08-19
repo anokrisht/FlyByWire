@@ -1,5 +1,7 @@
 #include "sensor_supervision.h"
 
+/* Sensor fault handling owned by the data-acquisition subsystem. */
+
 #include "uart_console.h"
 
 #include <stddef.h>
@@ -115,7 +117,20 @@ void SensorSupervision_Check(SensorSupervision *supervision, uint32_t now_ms)
   }
 
   SensorHealth *imu_health = &supervision->health[SUPERVISED_IMU];
-  if (SensorHealth_ShouldRetry(imu_health, now_ms))
+  SensorHealth *barometer_health =
+      &supervision->health[SUPERVISED_BAROMETER];
+  const bool retry_imu = SensorHealth_ShouldRetry(imu_health, now_ms);
+  const bool retry_barometer =
+      SensorHealth_ShouldRetry(barometer_health, now_ms);
+
+  if (retry_imu || retry_barometer)
+  {
+    const I2cBus *bus = (supervision->imu != NULL) ?
+        &supervision->imu->sensor.bus : &supervision->barometer->sensor.bus;
+    (void)I2cBus_Recover(bus);
+  }
+
+  if (retry_imu)
   {
     if (Imu_Reinitialize(supervision->imu) == ICM20948_OK)
     {
@@ -128,9 +143,7 @@ void SensorSupervision_Check(SensorSupervision *supervision, uint32_t now_ms)
     }
   }
 
-  SensorHealth *barometer_health =
-      &supervision->health[SUPERVISED_BAROMETER];
-  if (SensorHealth_ShouldRetry(barometer_health, now_ms))
+  if (retry_barometer)
   {
     if (Barometer_Reinitialize(supervision->barometer) == BMP390_OK)
     {

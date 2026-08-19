@@ -1,5 +1,5 @@
-#ifndef SENSOR_SUPERVISION_H
-#define SENSOR_SUPERVISION_H
+#ifndef DATA_ACQUISITION_SENSOR_SUPERVISION_H
+#define DATA_ACQUISITION_SENSOR_SUPERVISION_H
 
 #include "barometer.h"
 #include "gps_service.h"
@@ -48,4 +48,4 @@ bool SensorSupervision_IsOperational(const SensorSupervision *supervision,
 const SensorHealth *SensorSupervision_GetHealth(
     const SensorSupervision *supervision, SupervisedSensor sensor);
 
-#endif /* SENSOR_SUPERVISION_H */
+#endif /* DATA_ACQUISITION_SENSOR_SUPERVISION_H */

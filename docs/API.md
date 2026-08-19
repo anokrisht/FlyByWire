@@ -10,17 +10,20 @@ files.
 ```text
 main
   -> application
-      -> IMU service -> ICM-20948 driver -> generic I2C bus -> STM32 HAL
-      -> barometer service -> BMP388/BMP390 driver -> generic I2C bus
-      -> airspeed service -> STM32 ADC HAL
-      -> NMEA driver -> generic byte stream -> STM32 UART HAL
-      -> UART console -> STM32 UART HAL
-      -> sensor supervision -> sensor-health state machines
+      -> data acquisition
+          -> IMU service -> ICM-20948 driver -> generic I2C bus -> STM32 HAL
+          -> barometer service -> BMP388/BMP390 driver -> generic I2C bus
+          -> airspeed service -> STM32 ADC HAL
+          -> NMEA driver -> generic byte stream -> STM32 UART HAL
+          -> UART console -> STM32 UART HAL
+          -> sensor supervision -> sensor-health state machines
 ```
 
 `Core/Src/main.c` owns generated peripheral initialization.
-`Application/Src/application.c` coordinates the modules. Sensor algorithms and
-parsers do not depend directly on STM32 HAL.
+`Application/Src/application.c` is the top-level coordinator. The current
+sensor workflow lives in `Application/DataAcquisition`; future flight-software
+sections can be added beside it. Sensor algorithms and parsers do not depend
+directly on STM32 HAL.
 
 ## Application lifecycle
 
@@ -65,21 +68,28 @@ while (1)
 }
 ```
 
-### Application health getters
+### Unified acquisition data
 
 ```c
-const SensorHealth *Application_GetImuHealth(void);
-const SensorHealth *Application_GetGpsHealth(void);
-const SensorHealth *Application_GetBarometerHealth(void);
+const DataAcquisitionData *Application_GetData(void);
 ```
 
-Return read-only health information. Never modify the returned objects.
+Returns one read-only snapshot containing the latest IMU and orientation,
+barometer and altitude, airspeed, GPS, validity flags, timestamp, and all sensor
+health states. Always inspect the corresponding validity flag before using a
+measurement. Never modify the returned object.
 
 ```c
-const SensorHealth *health = Application_GetGpsHealth();
+const DataAcquisitionData *data = Application_GetData();
+
+if (data->orientation_valid)
+{
+  float roll_deg = data->orientation.roll_deg;
+}
+
 printf("GPS state: %s, failures: %lu\r\n",
-       SensorHealth_StateName(health->state),
-       (unsigned long)health->total_failures);
+       SensorHealth_StateName(data->gps_health.state),
+       (unsigned long)data->gps_health.total_failures);
 ```
 
 ## IMU service
@@ -374,7 +384,7 @@ keep both ports at equal pressure during startup. `Airspeed_Update` averages 16
 samples, calculates differential pressure, clamps negative dynamic pressure to
 zero for speed, and calculates indicated airspeed from the supplied air density.
 
-## Application sensor supervision
+## Data-acquisition sensor supervision
 
 Header: `sensor_supervision.h`
 
