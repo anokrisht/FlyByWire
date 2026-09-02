@@ -378,7 +378,8 @@ static void test_imu_orientation(void)
   CHECK(orientation != NULL);
   CHECK_NEAR(orientation->roll_deg, 0.0, 0.01);
   CHECK_NEAR(orientation->pitch_deg, 0.0, 0.01);
-  CHECK_NEAR(orientation->heading_deg, 0.0, 0.01);
+  /* Fake magnetic +X maps to aircraft-right for the installed orientation. */
+  CHECK_NEAR(orientation->heading_deg, 270.0, 0.01);
   Imu_Invalidate(&imu);
   CHECK(Imu_GetRaw(&imu) == NULL);
   CHECK(Imu_GetData(&imu) == NULL);
