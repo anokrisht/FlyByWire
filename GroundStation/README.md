@@ -63,6 +63,9 @@ The **Calibration** tab provides a five-second stationary accelerometer, gyro,
 and differential-pressure-zero measurement plus a rotate-through-all-axes
 magnetometer calibration. Results can be saved as JSON. This assistant computes
 calibration values but does not yet write them back to the microcontroller.
+The firmware calibration structure expects magnetometer offsets in microtesla,
+so the report includes both `suggested_offset_gauss` for inspection and
+`suggested_offset_ut` for `Icm20948_Calibration.magnetic_offset_ut`.
 
 ## MAVLink contract for a microcontroller
 

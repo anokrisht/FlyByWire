@@ -33,6 +33,31 @@ static float blend_angle(float predicted, float measured, float correction)
   return predicted + correction * error;
 }
 
+static void transform_sensor_to_aircraft_frame(Icm20948_Data *data)
+{
+  /*
+   * Installed ICM-20948 orientation:
+   *   sensor +Y -> aircraft forward
+   *   sensor +X -> aircraft right wing
+   *   sensor +Z -> aircraft up
+   *
+   * The driver has already aligned the internal magnetometer with the
+   * accelerometer/gyro package frame, so the same mounting transform applies
+   * to all three vectors.
+   */
+  const float acceleration_x = data->acceleration_mps2[0];
+  const float angular_rate_x = data->angular_rate_rps[0];
+  const float magnetic_x = data->magnetic_field_ut[0];
+
+  data->acceleration_mps2[0] = data->acceleration_mps2[1];
+  data->acceleration_mps2[1] = acceleration_x;
+  /* Positive aircraft roll is opposite the sensor +Y rotation direction. */
+  data->angular_rate_rps[0] = -data->angular_rate_rps[1];
+  data->angular_rate_rps[1] = angular_rate_x;
+  data->magnetic_field_ut[0] = data->magnetic_field_ut[1];
+  data->magnetic_field_ut[1] = magnetic_x;
+}
+
 Icm20948_Status Imu_Init(Imu *imu, const I2cBus *bus, uint8_t address)
 {
   if (imu == NULL)
@@ -82,6 +107,7 @@ Icm20948_Status Imu_Update(Imu *imu, uint32_t timestamp_ms)
   {
     return status;
   }
+  transform_sensor_to_aircraft_frame(&imu->data);
 
   const float ax = imu->data.acceleration_mps2[0];
   const float ay = imu->data.acceleration_mps2[1];
@@ -90,8 +116,13 @@ Icm20948_Status Imu_Update(Imu *imu, uint32_t timestamp_ms)
   const float my = imu->data.magnetic_field_ut[1];
   const float mz = imu->data.magnetic_field_ut[2];
 
-  const float measured_roll = atan2f(ay, az) * RAD_TO_DEG;
-  const float measured_pitch = atan2f(-ax, sqrtf((ay * ay) + (az * az))) * RAD_TO_DEG;
+  /*
+   * Aircraft convention: nose-up pitch and right-wing-down roll are positive.
+   * With this installed sensor orientation, those attitudes produce
+   * +forward and -right specific acceleration respectively.
+   */
+  const float measured_roll = atan2f(-ay, az) * RAD_TO_DEG;
+  const float measured_pitch = atan2f(ax, sqrtf((ay * ay) + (az * az))) * RAD_TO_DEG;
   const float roll_rad = measured_roll / RAD_TO_DEG;
   const float pitch_rad = measured_pitch / RAD_TO_DEG;
   const float horizontal_x = mx * cosf(pitch_rad) + mz * sinf(pitch_rad);
@@ -123,7 +154,8 @@ Icm20948_Status Imu_Update(Imu *imu, uint32_t timestamp_ms)
                                  imu->data.angular_rate_rps[0] * dt * RAD_TO_DEG;
     const float predicted_pitch = imu->orientation.pitch_deg +
                                   imu->data.angular_rate_rps[1] * dt * RAD_TO_DEG;
-    const float predicted_yaw = imu->orientation.yaw_deg +
+    /* Heading increases clockwise, while +Z gyro rotation is counter-clockwise. */
+    const float predicted_yaw = imu->orientation.yaw_deg -
                                 imu->data.angular_rate_rps[2] * dt * RAD_TO_DEG;
 
     imu->orientation.roll_deg =

@@ -333,6 +333,13 @@ static void test_icm20948(void)
   CHECK_NEAR(data.angular_rate_rps[0], 0.0174533, 0.000001);
   CHECK_NEAR(data.magnetic_field_ut[0], 15.0, 0.001);
 
+  /* AK09916 Y/Z are inverted relative to the accel/gyro package frame. */
+  raw.magnetic_field[1] = 200;
+  raw.magnetic_field[2] = -300;
+  CHECK(Icm20948_Convert(&device, &raw, &data) == ICM20948_OK);
+  CHECK_NEAR(data.magnetic_field_ut[1], -30.0, 0.001);
+  CHECK_NEAR(data.magnetic_field_ut[2], 45.0, 0.001);
+
   Icm20948_Calibration calibration = {0};
   calibration.acceleration_bias_mps2[2] = 0.1F;
   calibration.magnetic_offset_ut[0] = 5.0F;
@@ -363,6 +370,10 @@ static void test_imu_orientation(void)
   Imu imu;
   CHECK(Imu_Init(&imu, &bus, 0x68U) == ICM20948_OK);
   CHECK(Imu_Update(&imu, 10U) == ICM20948_OK);
+  const Icm20948_Data *data = Imu_GetData(&imu);
+  CHECK(data != NULL);
+  CHECK_NEAR(data->angular_rate_rps[0], 0.0, 0.000001);
+  CHECK_NEAR(data->angular_rate_rps[1], 0.0174533, 0.000001);
   const Imu_Orientation *orientation = Imu_GetOrientation(&imu);
   CHECK(orientation != NULL);
   CHECK_NEAR(orientation->roll_deg, 0.0, 0.01);

@@ -109,7 +109,9 @@ class AttitudeIndicator(QWidget):
         radius = min(self.width(), self.height()) * 0.43
         painter.setClipRect(self.rect())
         painter.translate(center)
-        painter.rotate(-self.roll)
+        # Match the displayed roll convention: positive roll moves the
+        # indicator toward the right wing instead of visually reversing it.
+        painter.rotate(self.roll)
         pitch_offset = max(-90.0, min(90.0, self.pitch)) * radius / 45.0
         painter.translate(0.0, pitch_offset)
         painter.fillRect(-self.width(), -self.height() * 2, self.width() * 2,
@@ -555,7 +557,7 @@ class Dashboard(QMainWindow):
         self.attitude.set_attitude(self.state.roll_deg, self.state.pitch_deg)
         self._set_box(self.roll_value, self.state.roll_deg, "°")
         self._set_box(self.pitch_value, self.state.pitch_deg, "°")
-        self._set_box(self.heading, self.state.yaw_deg, "°")
+        self._set_box(self.heading, self.state.heading_deg, "°")
         self._set_box(self.airspeed, self.state.airspeed_mps, "m/s")
         self._set_box(self.ground_speed, self.state.ground_speed_mps, "m/s")
         self._set_box(self.pressure_altitude, self.state.altitude_m, "m")

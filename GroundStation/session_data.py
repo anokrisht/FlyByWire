@@ -54,7 +54,7 @@ class CsvRecorder:
             "alert_level": state.alert_level(),
             "roll_deg": state.roll_deg,
             "pitch_deg": state.pitch_deg,
-            "heading_deg": state.yaw_deg,
+            "heading_deg": state.heading_deg,
             "airspeed_mps": state.airspeed_mps,
             "ground_speed_mps": state.ground_speed_mps,
             "pressure_altitude_m": state.altitude_m,
@@ -198,5 +198,6 @@ def calculate_magnetometer_calibration(samples: list[dict]) -> dict:
     return {
         "sample_count": len(samples), "minimum_gauss": minimum,
         "maximum_gauss": maximum, "suggested_offset_gauss": offset,
+        "suggested_offset_ut": [value * 100.0 for value in offset],
         "suggested_scale": scale,
     }

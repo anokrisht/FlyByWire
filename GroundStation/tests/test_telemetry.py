@@ -34,6 +34,16 @@ def test_attitude_is_converted_to_degrees():
     assert state.yaw_deg == pytest.approx(180.0)
 
 
+def test_vehicle_heading_is_independent_from_filtered_yaw_and_gps_course():
+    state = TelemetryState()
+    state.ingest(Message("ATTITUDE", roll=0.0, pitch=0.0,
+                         yaw=math.radians(90.0)))
+    state.ingest(Message("VFR_HUD", airspeed=12.0, groundspeed=0.0,
+                         heading=275, alt=100.0))
+    assert state.yaw_deg == pytest.approx(90.0)
+    assert state.heading_deg == pytest.approx(275.0)
+
+
 def test_timestamped_fault_sets_and_recovery_clears_lamp():
     state = TelemetryState()
     state.ingest(Message(

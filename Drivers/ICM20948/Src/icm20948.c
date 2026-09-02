@@ -198,8 +198,16 @@ Icm20948_Status Icm20948_Convert(const Icm20948 *device,
     data->angular_rate_rps[axis] =
         ((float)raw->angular_rate[axis] / GYRO_LSB_PER_DPS * DEG_TO_RAD) -
         device->calibration.angular_rate_bias_rps[axis];
+    /*
+     * The AK09916 compass Y and Z axes point opposite to the ICM-20948
+     * accelerometer/gyroscope axes (datasheet figures 12 and 13).  Express
+     * every sensor in the common accel/gyro package frame before calibration
+     * and sensor fusion.
+     */
+    const float magnetic_axis_sign = (axis == 0U) ? 1.0F : -1.0F;
     data->magnetic_field_ut[axis] =
-        (((float)raw->magnetic_field[axis] * MAG_UT_PER_LSB) -
+        (((float)raw->magnetic_field[axis] * MAG_UT_PER_LSB *
+          magnetic_axis_sign) -
          device->calibration.magnetic_offset_ut[axis]) *
         device->calibration.magnetic_scale[axis];
   }

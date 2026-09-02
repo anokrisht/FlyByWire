@@ -22,6 +22,7 @@ class TelemetryState:
     roll_deg: float = math.nan
     pitch_deg: float = math.nan
     yaw_deg: float = math.nan
+    heading_deg: float = math.nan
     acceleration_mps2: list[float] = field(
         default_factory=lambda: [math.nan] * 3)
     angular_rate_rps: list[float] = field(
@@ -119,7 +120,7 @@ class TelemetryState:
         self.airspeed_mps = float(msg.airspeed)
         self.ground_speed_mps = (float(msg.groundspeed)
                                  if self.gps_fix_type >= 2 else math.nan)
-        self.course_deg = float(msg.heading) % 360.0
+        self.heading_deg = float(msg.heading) % 360.0
         self.altitude_m = float(msg.alt)
 
     def _decode_gps_raw_int(self, msg: Any) -> None:

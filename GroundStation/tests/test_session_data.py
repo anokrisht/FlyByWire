@@ -14,6 +14,7 @@ def populated_state():
     state.roll_deg = 1.0
     state.pitch_deg = 2.0
     state.yaw_deg = 3.0
+    state.heading_deg = 4.0
     state.airspeed_mps = 20.0
     state.ground_speed_mps = 18.0
     state.altitude_m = 120.0
@@ -80,4 +81,5 @@ def test_magnetometer_calibration_offsets_and_scale():
     ]
     result = calculate_magnetometer_calibration(samples)
     assert result["suggested_offset_gauss"] == [1.0, -1.0, 0.0]
+    assert result["suggested_offset_ut"] == [100.0, -100.0, 0.0]
     assert all(value > 0.0 for value in result["suggested_scale"])
