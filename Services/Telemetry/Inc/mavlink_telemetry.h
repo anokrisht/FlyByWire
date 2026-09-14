@@ -3,14 +3,11 @@
 
 #include "data_acquisition.h"
 #include "mavlink_encoder.h"
-#include "stm32f4xx_hal.h"
-
 #include <stdbool.h>
 #include <stdint.h>
 
 typedef struct
 {
-  UART_HandleTypeDef *uart;
   MavlinkEncoder encoder;
   uint32_t last_heartbeat_ms;
   uint32_t last_imu_ms;
@@ -29,8 +26,7 @@ typedef struct
   uint32_t utc_base_tick_ms;
 } MavlinkTelemetry;
 
-void MavlinkTelemetry_Init(MavlinkTelemetry *telemetry,
-                           UART_HandleTypeDef *uart, uint32_t now_ms);
+void MavlinkTelemetry_Init(MavlinkTelemetry *telemetry, uint32_t now_ms);
 void MavlinkTelemetry_Run(MavlinkTelemetry *telemetry,
                           const DataAcquisitionData *data,
                           uint32_t now_ms);

@@ -2,6 +2,8 @@
 
 This desktop application displays telemetry from any MAVLink-compatible flight
 controller over a serial port or UDP. It is not tied to the STM32 firmware.
+The FlyByWire firmware appears as a USB CDC virtual COM port when running on the
+WeAct STM32F446RET6 core board.
 
 ## Screenshots
 
@@ -23,6 +25,10 @@ GroundStation/.venv/Scripts/Activate.ps1
 python -m pip install -r GroundStation/requirements.txt
 python GroundStation/main.py --endpoint COM4 --baud 115200
 ```
+
+Replace `COM4` with the virtual COM port named **FlyByWire WeAct
+STM32F446RET6**. USB CDC ignores the selected baud electrically, but the
+dashboard still requires a numeric value.
 
 Linux serial example:
 

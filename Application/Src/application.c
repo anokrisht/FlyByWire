@@ -10,9 +10,9 @@ void Application_Init(I2C_HandleTypeDef *i2c, ADC_HandleTypeDef *adc,
                       UART_HandleTypeDef *gps_uart)
 {
   DataAcquisition_Init(i2c, adc, console_uart, gps_uart);
-  /* From this point onward the console UART carries binary MAVLink only. */
+  /* Telemetry uses USB CDC; keep diagnostic UART output disabled. */
   UartConsole_SetOutputEnabled(false);
-  MavlinkTelemetry_Init(&telemetry, console_uart, HAL_GetTick());
+  MavlinkTelemetry_Init(&telemetry, HAL_GetTick());
 }
 
 void Application_Run(void)

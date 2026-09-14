@@ -1,4 +1,6 @@
 #include "mavlink_telemetry.h"
+#include "stm32f4xx_hal.h"
+#include "usbd_cdc_if.h"
 
 #include <limits.h>
 #include <math.h>
@@ -15,8 +17,7 @@
 #define GPS_PERIOD_MS                200U
 #define HUD_PERIOD_MS                100U
 #define FAULT_REPEAT_PERIOD_MS      5000U
-#define MAVLINK_UART_TIMEOUT_MS        20U
-
+#define MAVLINK_USB_TIMEOUT_MS        20U
 #define MAVLINK_MSG_ID_HEARTBEAT        0U
 #define MAVLINK_MSG_ID_GPS_RAW_INT     24U
 #define MAVLINK_MSG_ID_SCALED_PRESSURE 29U
@@ -86,8 +87,15 @@ static void transmit(MavlinkTelemetry *telemetry, uint32_t message_id,
       packet, sizeof(packet));
   if (length != 0U)
   {
-    (void)HAL_UART_Transmit(telemetry->uart, packet, (uint16_t)length,
-                            MAVLINK_UART_TIMEOUT_MS);
+    /* USB CDC owns a persistent copy of the packet until transmission ends. */
+    const uint32_t started_ms = HAL_GetTick();
+    uint8_t status;
+    do
+    {
+      status = CDC_Transmit_FS(packet, (uint16_t)length);
+    } while ((status == USBD_BUSY) &&
+             ((uint32_t)(HAL_GetTick() - started_ms) <
+              MAVLINK_USB_TIMEOUT_MS));
   }
 }
 
@@ -449,12 +457,10 @@ static void send_hud(MavlinkTelemetry *telemetry,
            payload, sizeof(payload));
 }
 
-void MavlinkTelemetry_Init(MavlinkTelemetry *telemetry,
-                           UART_HandleTypeDef *uart, uint32_t now_ms)
+void MavlinkTelemetry_Init(MavlinkTelemetry *telemetry, uint32_t now_ms)
 {
   if (telemetry == NULL) return;
   memset(telemetry, 0, sizeof(*telemetry));
-  telemetry->uart = uart;
   telemetry->last_heartbeat_ms = now_ms - HEARTBEAT_PERIOD_MS;
   telemetry->last_imu_ms = now_ms - HIGHRES_IMU_PERIOD_MS;
   telemetry->last_attitude_ms = now_ms - ATTITUDE_PERIOD_MS;
@@ -469,7 +475,7 @@ void MavlinkTelemetry_Init(MavlinkTelemetry *telemetry,
 void MavlinkTelemetry_Run(MavlinkTelemetry *telemetry,
                           const DataAcquisitionData *data, uint32_t now_ms)
 {
-  if ((telemetry == NULL) || (telemetry->uart == NULL) || (data == NULL)) return;
+  if ((telemetry == NULL) || (data == NULL)) return;
   update_utc_clock(telemetry, data, now_ms);
   const bool repeat_faults = elapsed(now_ms, &telemetry->last_fault_report_ms,
                                      FAULT_REPEAT_PERIOD_MS);

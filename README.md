@@ -2,9 +2,10 @@
 
 [![Tests](https://github.com/anokrisht/FlyByWire/actions/workflows/tests.yml/badge.svg)](https://github.com/anokrisht/FlyByWire/actions/workflows/tests.yml)
 
-STM32F446-based sensor platform with an ICM-20948 IMU, BMP388/BMP390
+FlyByWire runs on the compact **WeAct STM32F446RET6 core board**, with an
+ICM-20948 IMU, BMP388/BMP390
 barometer, analog differential-pressure airspeed sensor, NMEA GNSS receiver,
-UART telemetry, automatic sensor recovery, and host-side unit tests.
+USB CDC MAVLink telemetry, automatic sensor recovery, and host-side unit tests.
 
 ## Developer documentation
 
@@ -35,7 +36,7 @@ Services/
   GPS/                Structured navigation data and GPS getters
   Health/             Sensor supervision and recovery state machine
   IMU/                Calibration, conversion, and orientation service
-  Telemetry/          Standard MAVLink 2 encoding and UART publication
+  Telemetry/          Standard MAVLink 2 encoding and USB CDC publication
 Utilities/            Reusable platform-independent utilities
 Core/                  STM32CubeMX-generated startup and peripheral code
 tests/                 Portable unit and hardware test definitions

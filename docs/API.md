@@ -15,7 +15,7 @@ main
           -> barometer service -> BMP388/BMP390 driver -> generic I2C bus
           -> airspeed service -> STM32 ADC HAL
           -> NMEA driver -> generic byte stream -> STM32 UART HAL
-          -> UART console -> STM32 UART HAL
+          -> MAVLink telemetry -> USB CDC
           -> sensor supervision -> sensor-health state machines
 ```
 
@@ -38,7 +38,9 @@ void Application_Init(I2C_HandleTypeDef *i2c,
                       UART_HandleTypeDef *gps_uart);
 ```
 
-Attaches I2C1, ADC1 channel 0, the USART2 console, and the USART1 GPS receiver.
+Attaches I2C1, ADC1 channel 0, and the USART1 GPS receiver. Telemetry is
+published through the WeAct STM32F446RET6 USB CDC interface; the optional
+console handle is `NULL` in the current board configuration.
 It initializes sensor supervision and schedules recovery when hardware is
 unavailable. Keep both pitot ports at equal pressure while it auto-zeroes the
 airspeed sensor. Call it once after CubeMX initializes these peripherals.
@@ -46,9 +48,9 @@ airspeed sensor. Call it once after CubeMX initializes these peripherals.
 ```c
 MX_I2C1_Init();
 MX_ADC1_Init();
-MX_USART2_UART_Init();
 MX_USART1_UART_Init();
-Application_Init(&hi2c1, &hadc1, &huart2, &huart1);
+MX_USB_DEVICE_Init();
+Application_Init(&hi2c1, &hadc1, NULL, &huart1);
 ```
 
 ### `Application_Run`
